@@ -18,12 +18,13 @@ import {
   checkWeatherTriggers,
   simulateScenario,
 } from '@/lib/agent/tools/tier1_tools';
+import { compareSuppliersForPlan, getMarketPriceIntelligence } from '@/lib/agent/tools/tier2_tools';
 import { ragSearch, formatRetrievedContext } from '@/lib/kb/rag';
 import { CROPS } from '@/lib/kb/crops';
 import type { ToolName } from '@/lib/agent/tools/registry';
 
 export const runtime = 'nodejs';
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 function makeTraceEntry(iteration: number, toolName: ToolName, toolArgs: any, toolResult: any, durationMs: number) {
   return {
@@ -193,6 +194,35 @@ export async function GET(req: NextRequest) {
   const scenario = simulateScenario({ cropId: chosenCropId, farmSizeDecimal: farmSize, scenarioType: 'budget_cut_percent', changeValue: 30, sowingDate });
   trace.push(makeTraceEntry(iter, 'simulate_scenario', { cropId: chosenCropId, farmSizeDecimal: farmSize, scenarioType: 'budget_cut_percent', changeValue: 30, sowingDate }, scenario, Date.now() - scenarioStart));
 
+  // 10. Rank mock suppliers using the quantities calculated by the plan.
+  iter++;
+  const supplierStart = Date.now();
+  let suppliers: any = null;
+  try {
+    suppliers = compareSuppliersForPlan(chosenCropId, farmSize, location, 5);
+  } catch (e: any) {
+    suppliers = { error: e.message };
+  }
+  trace.push(makeTraceEntry(iter, 'compare_suppliers', {
+    cropId: chosenCropId, farmSizeDecimal: farmSize, farmerLocation: location, limit: 5,
+  }, suppliers, Date.now() - supplierStart));
+
+  // 11. Use an exact DAM commodity/year in this deterministic demo. The tool
+  // returns MONITOR until same-unit, same-market decision inputs are available.
+  iter++;
+  const marketStart = Date.now();
+  let marketIntelligence: any = null;
+  try {
+    marketIntelligence = await getMarketPriceIntelligence({
+      commodity: 'Aman-Fine', priceType: 'Retail', historicalYear: 2023,
+    });
+  } catch (e: any) {
+    marketIntelligence = { error: e.message };
+  }
+  trace.push(makeTraceEntry(iter, 'get_market_price_intelligence', {
+    commodity: 'Aman-Fine', priceType: 'Retail', historicalYear: 2023,
+  }, marketIntelligence, Date.now() - marketStart));
+
   // Build a summary answer
   const answer = `## Demo Plan (no LLM — tools only)
 
@@ -208,7 +238,9 @@ export async function GET(req: NextRequest) {
 
 **Tier 1 checks**: ${fertilizer?.fertilizerSchedule?.length || 0} verified fertilizer quantities, ${irrigation?.irrigationRecords?.length || 0} irrigation records, ${risk?.alerts?.length || 0} pest/disease risks assessed, and ${triggers?.triggeredRulesCount || 0} proactive weather rules triggered. A 30% budget cut leaves a ৳${scenario.simulated.fundingShortfallBdt.toLocaleString()} funding shortfall without silently reducing agronomic inputs.
 
-See the Crops / Calendar / Financials tabs on the right for full visualizations. Each tool call is in the Trace tab.`;
+**Tier 2 checks**: Supplier offers were ranked for ${suppliers?.comparisons?.length || 0} calculated plan inputs using delivered price, distance proxy, delivery time, rating, and stock. DAM market intelligence returned **${marketIntelligence?.recommendation?.replaceAll('_', ' ').toUpperCase() || 'UNAVAILABLE'}** for Aman-Fine; it will not invent a sell/store decision when unit, market, or expected future price is missing.
+
+See the Crops / Calendar / Financials / Suppliers / Market tabs on the right for full visualizations. Each tool call is in the Trace tab.`;
 
   return NextResponse.json({
     sessionId: `demo-${Date.now()}`,

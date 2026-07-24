@@ -21,6 +21,13 @@
 | 7 | Knowledge base with RAG — 1000 verified facts from BARI/BWMRI/BRRI/FAO + structured crop catalog; agent retrieves from it before advising | ✅ | Trace panel → `rag_search` returns scored chunks with source URLs; `get_kb_facts_by_crop` returns all facts for one crop |
 | 8 | Visible agent trace — UI exposes every tool call, parameters sent, raw return values | ✅ | Right-side "Visible Agent Trace" panel — click any entry to expand |
 
+**Tier 2 — Ambitious:**
+
+| Capability | Status | Where to see it |
+|---|---|---|
+| Marketplace and supplier comparison | ✅ | Ask where to buy planned inputs, or run the demo; see Suppliers + Trace tabs |
+| Current/historical market intelligence and sell/store/wait recommendation | ✅ | Ask about a commodity price or selling decision; see Market + Trace tabs |
+
 ---
 
 ## Tech stack
@@ -51,6 +58,8 @@ Farmer message
        • recommend_crops      — scores 3+ crops using profile + weather + KB
        • get_crop_calendar    — dated calendar with weather-aware advisories
        • compute_financials   — itemized per-acre costs + ROI + break-even
+       • compare_suppliers    — plan-derived quantities ranked against a seeded mock catalog
+       • get_market_price_intelligence — live DAM ticker, official history, deterministic decision math
    ↻ Each tool call persisted to TraceEntry table + surfaced in UI trace panel
    ↻ Tool result fed back as role=tool message
    ↻ LLM either calls more tools or emits final answer
@@ -67,6 +76,7 @@ Frontend renders chat reply + trace panel updates
 ### Real (live external calls)
 - **Weather**: `get_weather` tool calls Open-Meteo's geocoding API (`geocoding-api.open-meteo.com`) and forecast API (`api.open-meteo.com`). Every temperature, rainfall, and wind value shown in the trace and cited in recommendations comes from a real HTTP call. No invented forecasts.
 - **Bangladesh geocoding**: We use Open-Meteo's `country=BD` filter plus a small alias map (Bogura→Bogra, Jashore→Jessore, Chattogram→Chittagong, Cumilla→Comilla, etc.) so the geocoder reliably resolves Bangladesh district names.
+- **Market intelligence**: `get_market_price_intelligence` reads the live DAM headline ticker and the official DAM Graphical Report. Ticker values stay display-only when DAM does not expose their unit/market scope; the agent never silently feeds them into revenue or sell/store math.
 
 ### Curated from public sources (in-app knowledge base)
 The knowledge base has two layers:
@@ -111,7 +121,8 @@ When the agent retrieves a fact, both the trace panel and the final answer's Sou
 - **ROI, break-even price, break-even yield**: derived arithmetically from the above. The formulas are explicit in `financials.ts`.
 
 ### What is NOT real (limitations to disclose)
-- **Market prices** are static ranges from BBS Yearbook, not live DAM (Department of Agricultural Marketing) API. A live DAM feed would be a Tier 1/2 addition.
+- **Supplier commercial data is seeded mock data**: supplier identities, offers, prices, stock, ratings, and delivery times are simulated. Location anchors come from the official DAM market directory, while distance is a district-HQ proxy—not farmer-to-shop route distance. Ranking uses disclosed weights: delivered price 35%, distance 25%, delivery time 20%, rating 15%, stock 5%.
+- **DAM ticker scope is incomplete**: the live homepage ticker does not visibly resolve unit, market, or price type. It is shown as a headline snapshot only. A sell/store recommendation requires a verified same-unit current price, specific market, price type, future-price assumption, costs, and storage feasibility.
 - **Pest/disease predictions** are based on crop + growth stage + rainfall tolerance — not on a real epidemiological model. The advisories are heuristics grounded in extension manual guidance.
 - **bdapps Payment Gateway** (Tier 2, 10 points) is **not implemented** in this Tier 0 build. It would be the next addition after this core is stable.
 
@@ -267,6 +278,8 @@ The five behaviors judges will look for, and where each is implemented:
 - **Fertilizer and irrigation scheduling is implemented** with farm-size scaling only for compatible units, context warnings for alternative AEZ/technology records, organic records when available, and inspectable planning costs.
 - **Pest/disease risk is implemented** from growth stage plus real temperature, humidity, and rainfall. Missing inputs remain explicitly insufficient; weather never confirms infestation, and chemical labels must be verified locally.
 - **Scenario simulation is implemented** for budget, rainfall, selling price, input price, and sowing-date changes. The result shows changed financial/calendar values and discloses assumptions where a verified yield or water-balance response is unavailable.
+- **Tier 2 marketplace is implemented** with deterministic package rounding, stock enforcement, total delivered cost, excess quantity, normalized weighted ranking, and plan-derived input quantities. Every mock field is labeled in both tool output and UI.
+- **Tier 2 market intelligence is implemented** with a resilient live DAM ticker reader, official historical monthly series, explicit commodity/subgroup matching, and inspectable sell-now/store-or-wait/monitor formulas. Forecasts are assumptions, never guarantees, and incompatible units or price types are not mixed.
 - **bdapps Payment Gateway (Tier 2, 10 points)**: Sandbox CaaS API integration for input purchases. Documentation: https://dev.bdapps.com/API_Documentation/bdapps_tap_api.html
 - **Bengali language / voice interaction**: Currently English-only. Would require Bengali system prompt + TTS/ASR (e.g. via OpenAI Audio API or a Bengali-specific service).
 

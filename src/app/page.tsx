@@ -14,6 +14,7 @@ import {
   Sprout, Cloud, Calculator, CalendarDays, Search, Database, Loader2, ChevronRight,
   Activity, MapPin, User, Send, RefreshCw, Wrench, TrendingUp, AlertTriangle,
   Droplets, Target, Trophy, ExternalLink, Calendar, Coins, ListChecks, Sparkles,
+  ShoppingCart, BarChart3,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { ScenarioSimulator } from '@/components/ScenarioSimulator';
@@ -130,6 +131,8 @@ const TOOL_ICONS: Record<string, any> = {
   get_crop_calendar: CalendarDays,
   save_profile: Database,
   get_kb_facts_by_crop: Database,
+  compare_suppliers: ShoppingCart,
+  get_market_price_intelligence: BarChart3,
 };
 
 const TOOL_COLORS: Record<string, string> = {
@@ -140,6 +143,8 @@ const TOOL_COLORS: Record<string, string> = {
   get_crop_calendar: 'bg-rose-100 text-rose-700 border-rose-200',
   save_profile: 'bg-slate-100 text-slate-700 border-slate-200',
   get_kb_facts_by_crop: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  compare_suppliers: 'bg-violet-100 text-violet-700 border-violet-200',
+  get_market_price_intelligence: 'bg-cyan-100 text-cyan-700 border-cyan-200',
 };
 
 const RISK_COLORS: Record<string, string> = {
@@ -252,10 +257,12 @@ export default function Home() {
   }, [messages, loading]);
 
   // Parse the latest tool results from all traces to populate the visualization tabs
-  const { latestCrops, latestCalendar, latestFinancials } = useMemo(() => {
+  const { latestCrops, latestCalendar, latestFinancials, latestSuppliers, latestMarket } = useMemo(() => {
     let crops: CropRec[] | null = null;
     let calendar: CalendarResult | null = null;
     let financials: FinancialResult | null = null;
+    let suppliers: any = null;
+    let market: any = null;
 
     // Walk traces in order; keep the latest of each
     for (const t of allTraces) {
@@ -265,9 +272,13 @@ export default function Home() {
         calendar = t.toolResult as CalendarResult;
       } else if (t.toolName === 'compute_financials' && t.toolResult?.perAcre) {
         financials = t.toolResult as FinancialResult;
+      } else if (t.toolName === 'compare_suppliers' && t.toolResult?.comparisons) {
+        suppliers = t.toolResult;
+      } else if (t.toolName === 'get_market_price_intelligence' && t.toolResult?.recommendation) {
+        market = t.toolResult;
       }
     }
-    return { latestCrops: crops, latestCalendar: calendar, latestFinancials: financials };
+    return { latestCrops: crops, latestCalendar: calendar, latestFinancials: financials, latestSuppliers: suppliers, latestMarket: market };
   }, [allTraces]);
 
   const sendMessage = useCallback(async () => {
@@ -506,7 +517,7 @@ export default function Home() {
           <Card className="flex-1 flex flex-col min-h-[500px]">
             <CardHeader className="pb-2">
               <Tabs value={activeRightTab} onValueChange={setActiveRightTab}>
-                <TabsList className="grid grid-cols-5 h-9 w-full">
+                <TabsList className="grid grid-cols-7 h-auto w-full">
                   <TabsTrigger value="crops" className="text-xs gap-1">
                     <Sprout className="w-3 h-3" /> Crops
                     {latestCrops && <Badge variant="secondary" className="text-[9px] px-1 py-0 ml-1">{latestCrops.length}</Badge>}
@@ -522,6 +533,14 @@ export default function Home() {
                   <TabsTrigger value="scenario" className="text-xs gap-1 text-emerald-600 font-medium">
                     <TrendingUp className="w-3 h-3 text-emerald-600" /> Scenario Simulator
                     <Badge className="bg-emerald-500 text-white text-[9px] px-1 py-0 ml-1">Tier 1</Badge>
+                  </TabsTrigger>
+                  <TabsTrigger value="marketplace" className="text-xs gap-1 text-violet-700">
+                    <ShoppingCart className="w-3 h-3" /> Suppliers
+                    {latestSuppliers && <Badge className="bg-violet-600 text-white text-[9px] px-1 py-0">T2</Badge>}
+                  </TabsTrigger>
+                  <TabsTrigger value="market" className="text-xs gap-1 text-cyan-700">
+                    <BarChart3 className="w-3 h-3" /> Market
+                    {latestMarket && <Badge className="bg-cyan-600 text-white text-[9px] px-1 py-0">T2</Badge>}
                   </TabsTrigger>
                   <TabsTrigger value="trace" className="text-xs gap-1">
                     <Activity className="w-3 h-3" /> Trace
@@ -592,6 +611,32 @@ export default function Home() {
                   </ScrollArea>
                 </TabsContent>
 
+                {/* TIER 2 MARKETPLACE TAB */}
+                <TabsContent value="marketplace" className="mt-0 h-full">
+                  <ScrollArea className="h-[600px] pr-2">
+                    {!latestSuppliers ? (
+                      <EmptyState
+                        icon={<ShoppingCart className="w-8 h-8 text-stone-300" />}
+                        title="No supplier comparison yet"
+                        hint="Ask the agent where to buy your planned seed or fertilizer. It will calculate packages, check mock stock, include delivery, and rank suppliers with inspectable weights."
+                      />
+                    ) : <SupplierComparisonView result={latestSuppliers} />}
+                  </ScrollArea>
+                </TabsContent>
+
+                {/* TIER 2 MARKET INTELLIGENCE TAB */}
+                <TabsContent value="market" className="mt-0 h-full">
+                  <ScrollArea className="h-[600px] pr-2">
+                    {!latestMarket ? (
+                      <EmptyState
+                        icon={<BarChart3 className="w-8 h-8 text-stone-300" />}
+                        title="No market intelligence yet"
+                        hint="Ask whether to sell, store, or wait. The agent will retrieve official DAM current/history data and request any unit, market, or storage assumptions still missing."
+                      />
+                    ) : <MarketIntelligenceView result={latestMarket} />}
+                  </ScrollArea>
+                </TabsContent>
+
                 {/* TRACE TAB */}
                 <TabsContent value="trace" className="mt-0 h-full">
                   <ScrollArea className="h-[600px] pr-2">
@@ -619,7 +664,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t bg-white/60 py-3">
         <div className="max-w-[1800px] mx-auto px-4 text-center text-xs text-stone-500">
-          Real weather via Open-Meteo · 1000+ verified facts from BARI · BWMRI · BRRI · FAO · LLM via OpenAI GPT-4o · Built for Bdapps Agentic AI Hackathon
+          Real weather via Open-Meteo · Official DAM market data · Mock supplier marketplace · 1000+ verified facts from BARI · BWMRI · BRRI · FAO · Built for Bdapps Agentic AI Hackathon
         </div>
       </footer>
     </div>
@@ -950,6 +995,127 @@ function FinancialsView({ financials }: { financials: FinancialResult }) {
               <li key={i} className="text-blue-800 leading-snug">• {n}</li>
             ))}
           </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- Tier 2 Views ----------
+
+function SupplierComparisonView({ result }: { result: any }) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-violet-200 bg-violet-50 p-3">
+        <div className="flex items-center gap-2 font-semibold text-violet-900">
+          <ShoppingCart className="h-4 w-4" /> Supplier comparison
+          <Badge className="ml-auto bg-violet-600">Tier 2 · Mock</Badge>
+        </div>
+        <p className="mt-1 text-[11px] leading-relaxed text-violet-800">{result.disclaimer}</p>
+      </div>
+      {result.comparisons.map((comparison: any, comparisonIndex: number) => (
+        <div key={comparisonIndex} className="rounded-lg border border-stone-200 bg-white p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div>
+              <div className="font-semibold text-stone-800">{comparison.need.productName}</div>
+              <div className="text-xs text-stone-500">Need: {comparison.need.quantity} {comparison.need.unit}</div>
+            </div>
+            <Badge variant="outline">{comparison.eligibleInStockOffers} in stock</Badge>
+          </div>
+          {comparison.missingReason ? (
+            <div className="rounded bg-amber-50 p-2 text-xs text-amber-800">{comparison.missingReason}</div>
+          ) : (
+            <div className="space-y-2">
+              {comparison.rankedSuppliers.map((supplier: any) => (
+                <div key={supplier.supplierId} className="rounded border border-stone-200 p-2 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="mr-1 font-bold text-violet-700">#{supplier.rank}</span>
+                      <span className="font-semibold text-stone-800">{supplier.supplierName}</span>
+                      <div className="text-[10px] text-stone-500">{supplier.marketName}, {supplier.district}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-bold text-stone-900">৳{supplier.deliveredCostBdt.toLocaleString()}</div>
+                      <div className="text-[10px] text-violet-700">score {supplier.score}/100</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-1 text-[10px] text-stone-600">
+                    <span>{supplier.packagesNeeded} × {supplier.packageSize}{supplier.packageUnit}</span>
+                    <span>Delivery: {supplier.deliveryDays}d</span>
+                    <span>Rating: {supplier.rating}/5</span>
+                    <span>Goods: ৳{supplier.productCostBdt.toLocaleString()}</span>
+                    <span>Delivery: ৳{supplier.deliveryChargeBdt.toLocaleString()}</span>
+                    <span>Distance proxy: {supplier.distanceProxyKm}km</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MarketIntelligenceView({ result }: { result: any }) {
+  const current = result.currentOfficialTicker?.match;
+  const history = result.historicalOfficialSeries;
+  const recommendationColor = result.recommendation === 'sell_now'
+    ? 'bg-emerald-600' : result.recommendation === 'store_or_wait' ? 'bg-blue-600' : 'bg-amber-600';
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-cyan-200 bg-cyan-50 p-3">
+        <div className="flex items-center gap-2">
+          <BarChart3 className="h-4 w-4 text-cyan-800" />
+          <div className="font-semibold text-cyan-950">{result.commodityRequested} market intelligence</div>
+          <Badge className={`ml-auto ${recommendationColor}`}>{String(result.recommendation).replaceAll('_', ' ').toUpperCase()}</Badge>
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-cyan-900">{result.explanation}</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded border border-stone-200 bg-white p-2">
+          <div className="text-[10px] font-semibold uppercase text-stone-500">Live DAM ticker</div>
+          {current ? <>
+            <div className="font-semibold text-stone-800">{current.commodity}</div>
+            <div className="text-lg font-bold text-cyan-700">৳{current.minimum}–{current.maximum}</div>
+          </> : <div className="mt-1 text-amber-700">No unambiguous ticker match</div>}
+          <div className="mt-1 text-[10px] text-amber-700">Unit/market scope unresolved—display only.</div>
+        </div>
+        <div className="rounded border border-stone-200 bg-white p-2">
+          <div className="text-[10px] font-semibold uppercase text-stone-500">Official history</div>
+          <div className="font-semibold text-stone-800">{history.selectedCommodity?.text || 'Needs commodity clarification'}</div>
+          <div className="text-stone-600">{history.year || '—'} · {result.priceType} · {history.unit || 'unit unavailable'}</div>
+          <div className="mt-1 text-[10px] text-stone-500">{history.observations.length} monthly observations</div>
+        </div>
+      </div>
+
+      {history.observations.length > 0 && (
+        <div className="rounded border border-stone-200 bg-white p-2">
+          <div className="mb-2 text-[10px] font-semibold uppercase text-stone-500">Historical monthly prices</div>
+          <div className="grid grid-cols-4 gap-1">
+            {history.observations.map((point: any, index: number) => (
+              <div key={index} className="rounded bg-cyan-50 px-2 py-1 text-center text-xs">
+                <div className="text-[10px] text-stone-500">{point.label}</div>
+                <div className="font-semibold text-cyan-800">{point.y}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {result.missingForDecision?.length > 0 && (
+        <div className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+          <div className="font-semibold">Needed before sell/store decision:</div>
+          <ul className="mt-1 list-disc pl-4">
+            {result.missingForDecision.map((field: string) => <li key={field}>{field}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {result.decisionMath && (
+        <div className="rounded border border-emerald-200 bg-emerald-50 p-2 text-xs text-emerald-900">
+          Current net: <strong>৳{result.decisionMath.currentNetPrice}</strong> · Wait net: <strong>৳{result.decisionMath.expectedNetPriceAfterWaiting}</strong> · Difference: <strong>৳{result.decisionMath.differencePerUnit}</strong>/{result.decisionMath.inputs.currentUnit || 'unit'}
         </div>
       )}
     </div>

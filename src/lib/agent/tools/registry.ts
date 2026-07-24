@@ -15,6 +15,7 @@ import {
   checkWeatherTriggers,
   simulateScenario,
 } from './tier1_tools';
+import { compareSuppliers, compareSuppliersForPlan, getMarketPriceIntelligence } from './tier2_tools';
 
 export type ToolName =
   | 'get_weather'
@@ -28,12 +29,14 @@ export type ToolName =
   | 'get_irrigation_schedule'
   | 'assess_pest_disease_risk'
   | 'check_weather_triggers'
-  | 'simulate_scenario';
+  | 'simulate_scenario'
+  | 'compare_suppliers'
+  | 'get_market_price_intelligence';
 
 export interface ToolDefinition {
   name: ToolName;
   description: string;
-  paramSchema: { name: string; type: 'string' | 'number'; required: boolean; description: string }[];
+  paramSchema: { name: string; type: 'string' | 'number' | 'boolean'; required: boolean; description: string }[];
 }
 
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
@@ -140,6 +143,36 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       { name: 'scenarioType', type: 'string', required: true, description: 'Scenario type: "budget_cut_percent", "rainfall_change_percent", "selling_price_change_percent", "input_price_change_percent", or "sowing_delay_days"' },
       { name: 'changeValue', type: 'number', required: true, description: 'Numeric change value: use 30 for a 30% budget cut, -30 for a 30% rainfall/price drop, or 10 for a 10-day delay' },
       { name: 'sowingDate', type: 'string', required: false, description: 'ISO sowing date e.g. "2025-11-20"' },
+    ],
+  },
+  {
+    name: 'compare_suppliers',
+    description: 'Tier 2 marketplace tool. Match a JSON list of farm input needs to the seeded mock supplier catalog, calculate packages and delivered cost, enforce stock, and rank by the published weights for price, official market-distance proxy, delivery time, rating, and stock. All commercial data is explicitly labeled MOCK.',
+    paramSchema: [
+      { name: 'needs', type: 'string', required: false, description: 'Optional JSON array such as [{"productName":"Urea","quantity":55,"unit":"kg"}]. Prefer cropId + farmSizeDecimal for an existing plan so quantities are derived without LLM arithmetic.' },
+      { name: 'cropId', type: 'string', required: false, description: 'Existing structured crop ID, e.g. maize or potato. Supply with farmSizeDecimal to derive plan needs.' },
+      { name: 'farmSizeDecimal', type: 'number', required: false, description: 'Farm size used with cropId to derive total input quantities.' },
+      { name: 'farmerLocation', type: 'string', required: false, description: 'Farmer location from the persisted profile. The catalog distance remains a market-to-district-HQ proxy, not route distance.' },
+      { name: 'limit', type: 'number', required: false, description: 'Maximum ranked suppliers per input, default 5.' },
+    ],
+  },
+  {
+    name: 'get_market_price_intelligence',
+    description: 'Tier 2 market intelligence tool. Fetch the live official DAM headline ticker, discover an official historical monthly commodity series, and apply deterministic sell-now/store-or-wait/monitor rules. It refuses decision math when unit, market, price type, current price, or future-price assumptions are unresolved.',
+    paramSchema: [
+      { name: 'commodity', type: 'string', required: true, description: 'Specific DAM commodity/grade when known, e.g. "Aman-Fine", "Potato", "Tomato", "Mung". A broad crop may return clarification candidates.' },
+      { name: 'priceType', type: 'string', required: false, description: 'Growers, Retail, or Wholesale. Use Growers for farm selling unless the farmer specifies otherwise.' },
+      { name: 'historicalYear', type: 'number', required: false, description: 'Preferred historical year; the tool checks up to three earlier years when empty.' },
+      { name: 'verifiedCurrentPricePerUnit', type: 'number', required: false, description: 'Current price only when its unit, market, and price type are confirmed.' },
+      { name: 'currentUnit', type: 'string', required: false, description: 'Confirmed current-price unit, e.g. kg, maund, or quintal.' },
+      { name: 'market', type: 'string', required: false, description: 'Specific current market matching the price.' },
+      { name: 'expectedFuturePricePerUnit', type: 'number', required: false, description: 'Explicit non-guaranteed future-price assumption in the same unit.' },
+      { name: 'immediateTransportCostPerUnit', type: 'number', required: false, description: 'Transport cost per unit if sold now.' },
+      { name: 'storageCostPerUnit', type: 'number', required: false, description: 'Storage cost per unit for the waiting period.' },
+      { name: 'spoilageLossPercent', type: 'number', required: false, description: 'Expected percentage value loss during storage.' },
+      { name: 'financingCostPerUnit', type: 'number', required: false, description: 'Financing/opportunity cost per unit while waiting.' },
+      { name: 'laterTransportCostPerUnit', type: 'number', required: false, description: 'Transport cost per unit when sold later.' },
+      { name: 'storageFeasible', type: 'boolean', required: false, description: 'Whether safe storage is actually available for this crop and duration.' },
     ],
   },
 ];
@@ -292,6 +325,31 @@ export async function executeTool(name: ToolName, args: Record<string, any>): Pr
           scenarioType: args.scenarioType,
           changeValue: Number(args.changeValue),
           sowingDate: args.sowingDate,
+        });
+        break;
+      }
+      case 'compare_suppliers': {
+        result = args.needs
+          ? compareSuppliers(args.needs, args.farmerLocation, Number(args.limit || 5))
+          : compareSuppliersForPlan(args.cropId, Number(args.farmSizeDecimal), args.farmerLocation, Number(args.limit || 5));
+        break;
+      }
+      case 'get_market_price_intelligence': {
+        const priceType = ['Growers', 'Retail', 'Wholesale'].includes(args.priceType) ? args.priceType : 'Growers';
+        result = await getMarketPriceIntelligence({
+          commodity: args.commodity,
+          priceType,
+          historicalYear: args.historicalYear === undefined ? undefined : Number(args.historicalYear),
+          verifiedCurrentPricePerUnit: args.verifiedCurrentPricePerUnit === undefined ? undefined : Number(args.verifiedCurrentPricePerUnit),
+          currentUnit: args.currentUnit,
+          market: args.market,
+          expectedFuturePricePerUnit: args.expectedFuturePricePerUnit === undefined ? undefined : Number(args.expectedFuturePricePerUnit),
+          immediateTransportCostPerUnit: args.immediateTransportCostPerUnit === undefined ? undefined : Number(args.immediateTransportCostPerUnit),
+          storageCostPerUnit: args.storageCostPerUnit === undefined ? undefined : Number(args.storageCostPerUnit),
+          spoilageLossPercent: args.spoilageLossPercent === undefined ? undefined : Number(args.spoilageLossPercent),
+          financingCostPerUnit: args.financingCostPerUnit === undefined ? undefined : Number(args.financingCostPerUnit),
+          laterTransportCostPerUnit: args.laterTransportCostPerUnit === undefined ? undefined : Number(args.laterTransportCostPerUnit),
+          storageFeasible: typeof args.storageFeasible === 'boolean' ? args.storageFeasible : undefined,
         });
         break;
       }
