@@ -1,0 +1,59 @@
+// AgriSense AI — Prisma schema
+// Persists farmer profile + conversation history + agent trace across sessions (Tier 0 #4 Memory)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Farmer {
+  id              String   @id @default(cuid())
+  sessionId       String   @unique
+  name            String?
+  location        String?  // human-readable, e.g. "Jashore, Bangladesh"
+  latitude        Float?
+  longitude       Float?
+  farmSizeDecimal Float?   // farm size in decimal (1 acre = 100 decimal)
+  soilType        String?  // sandy | loamy | clay | saline | silty
+  waterSource     String?  // tubewell | canal | rainfed | river | pond
+  budgetBdt       Float?   // budget in BDT
+  targetSeason    String?  // aus | aman | boro | rabi | kharif-1 | kharif-2
+  chosenCrop      String?
+  sowingDate      String?  // ISO date
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  conversations   Conversation[]
+  traces          TraceEntry[]
+}
+
+model Conversation {
+  id         String   @id @default(cuid())
+  farmerId   String
+  role       String   // user | assistant | system
+  content    String
+  createdAt  DateTime @default(now())
+
+  farmer     Farmer   @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+
+  @@index([farmerId])
+}
+
+// Visible agent trace (Tier 0 #8) — every tool call, params, raw return
+model TraceEntry {
+  id         String   @id @default(cuid())
+  farmerId   String
+  toolName   String   // get_weather | rag_search | recommend_crops | ...
+  toolArgs   String   // JSON string
+  toolResult String   // JSON string
+  durationMs Int
+  createdAt  DateTime @default(now())
+
+  farmer     Farmer   @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+
+  @@index([farmerId])
+}
