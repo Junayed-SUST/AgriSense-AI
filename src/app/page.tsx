@@ -14,10 +14,11 @@ import {
   Sprout, Cloud, Calculator, CalendarDays, Search, Database, Loader2, ChevronRight,
   Activity, MapPin, User, Send, RefreshCw, Wrench, TrendingUp, AlertTriangle,
   Droplets, Target, Trophy, ExternalLink, Calendar, Coins, ListChecks, Sparkles,
-  ShoppingCart, BarChart3, Languages,
+  ShoppingCart, BarChart3, Languages, Bug,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { ScenarioSimulator } from '@/components/ScenarioSimulator';
+import { PlantDiseaseDetector } from '@/components/PlantDiseaseDetector';
 
 // ---------- Types ----------
 
@@ -387,6 +388,7 @@ export default function Home() {
               <button onClick={() => changeLanguage('bn')} className={`rounded px-2 py-1 text-xs font-medium ${language === 'bn' ? 'bg-green-700 text-white' : 'text-stone-600 hover:bg-stone-100'}`}>বাংলা</button>
             </div>
             <Badge variant="outline" className="bg-amber-50 border-amber-300 text-amber-800">{language === 'bn' ? 'টিয়ার ০ — মূল সংস্করণ' : 'Tier 0 — Core Build'}</Badge>
+            <Badge variant="outline" className="bg-violet-50 border-violet-300 text-violet-800">{language === 'bn' ? '🔬 রোগ নির্ণয় AI (৩৮ ক্লাস)' : '🔬 Disease Classifier (PlantVillage)'}</Badge>
             <Badge variant="outline" className="bg-emerald-50 border-emerald-300 text-emerald-800">{language === 'bn' ? '১০০০+ যাচাইকৃত তথ্য' : '1000+ verified facts'} (BARI · BWMRI · BRRI · FAO)</Badge>
             <Button variant="outline" size="sm" onClick={runDemoPlan} disabled={loading} title={language === 'bn' ? 'AI মডেল ছাড়াই একটি নমুনা পরিকল্পনা চালান' : 'Run a sample plan without the LLM'}>
               <Sparkles className="w-3.5 h-3.5 mr-1.5" />
@@ -559,6 +561,10 @@ export default function Home() {
                     <BarChart3 className="w-3 h-3" /> {language === 'bn' ? 'বাজার' : 'Market'}
                     {latestMarket && <Badge className="bg-cyan-600 text-white text-[9px] px-1 py-0">T2</Badge>}
                   </TabsTrigger>
+                  <TabsTrigger value="disease" className="h-auto min-h-9 min-w-0 gap-1 whitespace-normal px-1 text-[11px] font-medium leading-tight text-violet-600">
+                    <Bug className="w-3 h-3 text-violet-600" /> {language === 'bn' ? 'রোগ নির্ণয়' : 'Disease'}
+                    <Badge className="bg-violet-600 text-white text-[9px] px-1 py-0">AI</Badge>
+                  </TabsTrigger>
                   <TabsTrigger value="trace" className="h-auto min-h-9 min-w-0 gap-1 whitespace-normal px-1 text-[11px] leading-tight">
                     <Activity className="w-3 h-3" /> {language === 'bn' ? 'ট্রেস' : 'Trace'}
                     <Badge variant="secondary" className="text-[9px] px-1 py-0 ml-1">{allTraces.length}</Badge>
@@ -624,7 +630,7 @@ export default function Home() {
                 {/* SCENARIO SIMULATOR TAB */}
                 <TabsContent value="scenario" className="mt-0 h-full">
                   <ScrollArea className="h-[600px] pr-2">
-                    <ScenarioSimulator language={language} />
+                    <ScenarioSimulator language={language} recommendedCrops={latestCrops} />
                   </ScrollArea>
                 </TabsContent>
 
@@ -651,6 +657,13 @@ export default function Home() {
                         hint={language === 'bn' ? 'এখন বিক্রি, সংরক্ষণ নাকি অপেক্ষা করবেন জিজ্ঞাসা করুন। এজেন্ট সরকারি DAM তথ্য বিশ্লেষণ করবে।' : 'Ask whether to sell, store, or wait. The agent will retrieve official DAM current/history data and request any unit, market, or storage assumptions still missing.'}
                       />
                     ) : <MarketIntelligenceView result={latestMarket} language={language} />}
+                  </ScrollArea>
+                </TabsContent>
+
+                {/* PLANT DISEASE DETECTION TAB */}
+                <TabsContent value="disease" className="mt-0 h-full">
+                  <ScrollArea className="h-[600px] pr-2">
+                    <PlantDiseaseDetector language={language} />
                   </ScrollArea>
                 </TabsContent>
 

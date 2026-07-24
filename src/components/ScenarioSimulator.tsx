@@ -1,13 +1,51 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { simulateScenario } from '@/lib/agent/tools/tier1_tools';
 
-export function ScenarioSimulator({ language = 'en' }: { language?: 'en' | 'bn' }) {
-  const [cropId, setCropId] = useState('potato');
+interface RecommendedCrop {
+  cropId: string;
+  cropName: string;
+  bnName: string;
+  [key: string]: any;
+}
+
+interface ScenarioSimulatorProps {
+  language?: 'en' | 'bn';
+  recommendedCrops?: RecommendedCrop[] | null;
+}
+
+// Fallback crops used only when no recommendations are available
+const FALLBACK_CROPS = [
+  { cropId: 'potato', nameEn: 'Potato (গোল আলু)', nameBn: 'গোল আলু' },
+  { cropId: 'tomato', nameEn: 'Tomato (টমেটো)', nameBn: 'টমেটো' },
+  { cropId: 'maize', nameEn: 'Maize (ভুট্টা)', nameBn: 'ভুট্টা' },
+  { cropId: 'rice-aman', nameEn: 'T. Aman Rice (আমন ধান)', nameBn: 'টি. আমন ধান' },
+  { cropId: 'wheat', nameEn: 'Wheat (গম — BARI Gom-28)', nameBn: 'গম — BARI Gom-28' },
+  { cropId: 'mustard', nameEn: 'Mustard (সরিষা)', nameBn: 'সরিষা' },
+];
+
+export function ScenarioSimulator({ language = 'en', recommendedCrops }: ScenarioSimulatorProps) {
+  // Build dropdown options from recommended crops, or use fallback
+  const cropOptions = recommendedCrops && recommendedCrops.length > 0
+    ? recommendedCrops.map(c => ({
+        cropId: c.cropId,
+        nameEn: `${c.cropName} (${c.bnName})`,
+        nameBn: c.bnName,
+      }))
+    : FALLBACK_CROPS;
+
+  const [cropId, setCropId] = useState(cropOptions[0]?.cropId || 'potato');
   const [farmSizeDecimal, setFarmSizeDecimal] = useState(100);
   const [scenarioType, setScenarioType] = useState<'budget_cut_percent' | 'rainfall_change_percent' | 'selling_price_change_percent' | 'input_price_change_percent' | 'sowing_delay_days'>('budget_cut_percent');
   const [changeValue, setChangeValue] = useState(30);
+
+  // When recommended crops change, reset selection to the first recommended crop
+  useEffect(() => {
+    if (cropOptions.length > 0 && !cropOptions.find(c => c.cropId === cropId)) {
+      setCropId(cropOptions[0].cropId);
+    }
+  }, [recommendedCrops]);
 
   const result = simulateScenario({
     cropId,
@@ -35,18 +73,24 @@ export function ScenarioSimulator({ language = 'en' }: { language?: 'en' | 'bn' 
       {/* Controls */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div>
-          <label className="block text-xs text-slate-400 mb-1 font-medium">{language === 'bn' ? 'লক্ষ্য ফসল' : 'Target Crop'}</label>
+          <label className="block text-xs text-slate-400 mb-1 font-medium">
+            {language === 'bn' ? 'লক্ষ্য ফসল' : 'Target Crop'}
+            {recommendedCrops && recommendedCrops.length > 0 && (
+              <span className="ml-1.5 text-emerald-400 font-normal">
+                ({language === 'bn' ? 'প্রস্তাবিত' : 'recommended'})
+              </span>
+            )}
+          </label>
           <select
             value={cropId}
             onChange={(e) => setCropId(e.target.value)}
             className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-emerald-500"
           >
-            <option value="potato">{language === 'bn' ? 'গোল আলু' : 'Potato (গোল আলু)'}</option>
-            <option value="tomato">{language === 'bn' ? 'টমেটো' : 'Tomato (টমেটো)'}</option>
-            <option value="maize">{language === 'bn' ? 'ভুট্টা' : 'Maize (ভুট্টা)'}</option>
-            <option value="rice-aman">{language === 'bn' ? 'টি. আমন ধান' : 'T. Aman Rice (আমন ধান)'}</option>
-            <option value="wheat">{language === 'bn' ? 'গম — BARI Gom-28' : 'Wheat (গম — BARI Gom-28)'}</option>
-            <option value="mustard">{language === 'bn' ? 'সরিষা' : 'Mustard (সরিষা)'}</option>
+            {cropOptions.map(c => (
+              <option key={c.cropId} value={c.cropId}>
+                {language === 'bn' ? c.nameBn : c.nameEn}
+              </option>
+            ))}
           </select>
         </div>
 
