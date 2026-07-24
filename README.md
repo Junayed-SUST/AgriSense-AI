@@ -8,6 +8,8 @@
 
 ## What this submission covers
 
+The interface includes a persistent **English / বাংলা** selector. The chosen language controls the application labels, deterministic demo output, validation/fallback messages, and every agent response. The language is sent explicitly with each chat request, so mixed-language conversation history cannot silently override the farmer's selection. Bangla responses retain the same Markdown headings, bullet lists, recommendations, calculations, caveats, and source detail as English responses.
+
 **Tier 0 — Core (all 8 capabilities implemented and demoed end-to-end):**
 
 | # | Capability | Status | Where to see it |

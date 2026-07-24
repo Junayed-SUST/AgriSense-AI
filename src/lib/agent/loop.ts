@@ -78,7 +78,7 @@ export interface AgentRunResult {
   iterations: number;
 }
 
-function buildSystemPrompt(profile: any, seasonMemory?: any): string {
+function buildSystemPrompt(profile: any, seasonMemory?: any, responseLanguage: 'en' | 'bn' = 'en'): string {
   const profileText = profile
     ? Object.entries(profile)
         .filter(([_, v]) => v !== null && v !== undefined)
@@ -109,7 +109,17 @@ function buildSystemPrompt(profile: any, seasonMemory?: any): string {
       }, null, 2)
     : '(no active season plan saved yet)';
 
+  const languageInstruction = responseLanguage === 'bn'
+    ? `# RESPONSE LANGUAGE — BANGLA
+The farmer selected বাংলা in the interface. Write every user-facing sentence, heading, follow-up question, warning, explanation, and recommendation in natural, easy-to-understand Bangla (বাংলা). Keep unavoidable official names, crop IDs, measurement units, URLs, and source titles unchanged where translation would reduce accuracy. Do not switch to English merely because earlier conversation messages or tool results are English.
+
+LANGUAGE PARITY IS MANDATORY: A Bangla answer must contain the same depth, calculations, actionable suggestions, alternatives, caveats, sources, and Markdown structure that you would provide in English. Translation must never mean summarization. Preserve headings, numbered steps, bullet lists, comparison tables, bold emphasis, and recommendation lists; translate their text into Bangla. Never collapse a structured English-style answer into one Bangla paragraph. For missing intake information, show the missing fields as a short bullet list and provide one example Bangla reply the farmer can copy.`
+    : `# RESPONSE LANGUAGE — ENGLISH
+The farmer selected English in the interface. Write every user-facing sentence, heading, follow-up question, warning, explanation, and recommendation in clear English. Keep Bangla crop names only when they help identification. Do not switch to Bangla merely because earlier conversation messages are Bangla.`;
+
   return `You are **AgriSense AI**, an autonomous agricultural advisor for Bangladeshi smallholder farmers. You take a farmer from an empty field to a costed, weather-aware season plan and keep advising through harvest.
+
+${languageInstruction}
 
 # CRITICAL BEHAVIORS — judges will verify ALL FIVE:
 1. **Tool use**: You MUST call real external tools (weather API, RAG retriever, financial calculator). NEVER invent weather data, prices, fertilizer doses, variety names, or yields. If you don't have data from a tool call, you don't have data.
@@ -170,7 +180,7 @@ If any are missing, ask ONLY for the missing ones. Save any new fields immediate
 13. Write the final integrated answer.
 
 # FINAL ANSWER FORMAT (when all tools have run):
-Write a markdown answer with these sections:
+Write a markdown answer with these semantic sections. When the selected response language is Bangla, translate every heading below into natural Bangla; the English labels are structural examples, not permission to change language:
 - **Candidate Crop Ranking** — show at least 3 candidates with suitability, water need, risk, rough per-acre cost/revenue/profit, and the farm/weather inputs behind the ranking.
 - **Recommended Crop + Rationale** — name the crop AND specific variety if KB has one (e.g. "BARI Gom-28"). Cite soil match (from KB), water match (from profile + weather), budget fit (from compute_financials), and risk level.
 - **🌱 Fertilizer & Irrigation Schedule** — detailed dosages from get_fertilizer_schedule (Urea, TSP, MoP, Gypsum) and irrigation intervals from get_irrigation_schedule.
@@ -186,6 +196,7 @@ Write a markdown answer with these sections:
 - When the KB has a specific variety recommendation (e.g. "BARI Gom-28"), USE IT — don't just say "wheat".
 - Cite fact IDs in your reasoning so judges can verify each claim against the trace panel.
 - Keep answers concise but complete. Use bullet points and bold for scannability.
+- Formatting is language-independent: use the same Markdown hierarchy and number of recommendation bullets in English and Bangla. Do not replace lists with prose in Bangla.
 `;
 }
 
@@ -216,6 +227,7 @@ function buildToolSchemas() {
 export async function runAgent(
   sessionId: string,
   userMessage: string,
+  responseLanguage: 'en' | 'bn' = 'en',
 ): Promise<AgentRunResult> {
   // 1. Load farmer profile + recent conversation history
   let farmer = await db.farmer.findUnique({ where: { sessionId } });
@@ -263,7 +275,7 @@ export async function runAgent(
   }));
 
   // 2. Build the message list
-  const systemPrompt = buildSystemPrompt(profile, seasonMemory);
+  const systemPrompt = buildSystemPrompt(profile, seasonMemory, responseLanguage);
   const messages: any[] = [
     { role: 'system', content: systemPrompt },
     ...history,
@@ -300,11 +312,13 @@ export async function runAgent(
       });
       assistantMessage = completion.choices?.[0]?.message;
       if (!assistantMessage) {
-        finalAnswer = '⚠️ Empty response from LLM. Please retry.';
+        finalAnswer = responseLanguage === 'bn' ? '⚠️ মডেল থেকে কোনো উত্তর পাওয়া যায়নি। আবার চেষ্টা করুন।' : '⚠️ Empty response from LLM. Please retry.';
         break;
       }
     } catch (err: any) {
-      finalAnswer = `⚠️ LLM call failed: ${err.message}. Please retry.`;
+      finalAnswer = responseLanguage === 'bn'
+        ? `⚠️ AI মডেলের অনুরোধ ব্যর্থ হয়েছে: ${err.message}। আবার চেষ্টা করুন।`
+        : `⚠️ LLM call failed: ${err.message}. Please retry.`;
       break;
     }
 
@@ -434,7 +448,9 @@ export async function runAgent(
   }
 
   if (!finalAnswer) {
-    finalAnswer = '⚠️ I reached my reasoning limit without producing a final answer. Please rephrase or simplify your request, or ask for one piece at a time.';
+    finalAnswer = responseLanguage === 'bn'
+      ? '⚠️ উত্তর সম্পন্ন করার আগেই বিশ্লেষণের সীমা শেষ হয়েছে। অনুরোধটি সহজভাবে লিখুন অথবা একবারে একটি বিষয় জিজ্ঞাসা করুন।'
+      : '⚠️ I reached my reasoning limit without producing a final answer. Please rephrase or simplify your request, or ask for one piece at a time.';
   }
 
   // Save final answer

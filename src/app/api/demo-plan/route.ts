@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
   const water = sp.get('water') || 'tubewell';
   const budget = Number(sp.get('budget') || '25000');
   const season = sp.get('season') || 'rabi';
+  const language = sp.get('language') === 'bn' ? 'bn' : 'en';
 
   const profile: FarmProfile = {
     location,
@@ -224,7 +225,7 @@ export async function GET(req: NextRequest) {
   }, marketIntelligence, Date.now() - marketStart));
 
   // Build a summary answer
-  const answer = `## Demo Plan (no LLM — tools only)
+  const englishAnswer = `## Demo Plan (no LLM — tools only)
 
 **Profile**: ${farmSize} decimal in ${location}, ${soil} soil, ${water} water, ${season} season, ৳${budget.toLocaleString()} budget.
 
@@ -241,6 +242,26 @@ export async function GET(req: NextRequest) {
 **Tier 2 checks**: Supplier offers were ranked for ${suppliers?.comparisons?.length || 0} calculated plan inputs using delivered price, distance proxy, delivery time, rating, and stock. DAM market intelligence returned **${marketIntelligence?.recommendation?.replaceAll('_', ' ').toUpperCase() || 'UNAVAILABLE'}** for Aman-Fine; it will not invent a sell/store decision when unit, market, or expected future price is missing.
 
 See the Crops / Calendar / Financials / Suppliers / Market tabs on the right for full visualizations. Each tool call is in the Trace tab.`;
+
+  const banglaAnswer = `## ডেমো পরিকল্পনা (AI মডেল ছাড়া—শুধু টুল)
+
+**প্রোফাইল**: ${location}-এ ${farmSize} শতক জমি, ${soil} মাটি, ${water} পানি, ${season} মৌসুম এবং ৳${budget.toLocaleString('bn-BD')} বাজেট।
+
+**আবহাওয়া**: ${weather?.location ? `${weather.location}—আগামী ৭ দিনে ${weather.summary.totalRain7dMm.toFixed(0)} মিমি বৃষ্টি, গড় তাপমাত্রা ${weather.summary.avgTempC.toFixed(1)}°সে.` : 'তথ্য পাওয়া যায়নি'}
+
+**সেরা প্রস্তাবিত ফসল**: ${topCrop?.cropName || chosenCropRecord?.name} (উপযোগিতা ${topCrop?.suitabilityScore || '?'}/১০০, ROI ${topCrop?.roiPercent || '?'}%)।
+
+**ক্যালেন্ডার**: ${calendar?.sowingDate} থেকে ${calendar?.harvestDate} পর্যন্ত ${calendar?.totalDays || '?'} দিন। আবহাওয়া পরামর্শ ${calendar?.weatherAdvisories?.length || 0}টি।
+
+**আর্থিক হিসাব**: মোট খরচ ৳${financials?.totals?.totalCost?.toLocaleString('bn-BD') || '?'}, আয় ৳${financials?.totals?.totalRevenue?.toLocaleString('bn-BD') || '?'}, লাভ ৳${financials?.totals?.totalProfit?.toLocaleString('bn-BD') || '?'}, ROI ${financials?.perAcre?.roiPercent || '?'}%।
+
+**টিয়ার ১ যাচাই**: ${fertilizer?.fertilizerSchedule?.length || 0}টি সার পরিমাণ, ${irrigation?.irrigationRecords?.length || 0}টি সেচ তথ্য, ${risk?.alerts?.length || 0}টি রোগবালাই ঝুঁকি এবং ${triggers?.triggeredRulesCount || 0}টি আবহাওয়া নিয়ম যাচাই করা হয়েছে। বাজেট ৩০% কমলে প্রয়োজনীয় কৃষি উপকরণ না কমিয়ে ৳${scenario.simulated.fundingShortfallBdt.toLocaleString('bn-BD')} ঘাটতি থাকে।
+
+**টিয়ার ২ যাচাই**: ${suppliers?.comparisons?.length || 0}টি পরিকল্পিত উপকরণের জন্য মূল্য, দূরত্ব প্রক্সি, ডেলিভারি সময়, রেটিং ও মজুত অনুযায়ী সরবরাহকারী সাজানো হয়েছে। Aman-Fine-এর DAM বাজার বিশ্লেষণের ফল **${marketIntelligence?.recommendation === 'monitor' ? 'পর্যবেক্ষণ করুন' : marketIntelligence?.recommendation === 'sell_now' ? 'এখন বিক্রি করুন' : marketIntelligence?.recommendation === 'store_or_wait' ? 'সংরক্ষণ/অপেক্ষা করুন' : 'পাওয়া যায়নি'}**। একক, বাজার বা ভবিষ্যৎ মূল্য অনুপস্থিত থাকলে সিদ্ধান্ত বানানো হয় না।
+
+সম্পূর্ণ ফল দেখতে ডান পাশের ফসল / ক্যালেন্ডার / হিসাব / সরবরাহকারী / বাজার ট্যাব দেখুন। প্রতিটি টুল কল ট্রেস ট্যাবে রয়েছে।`;
+
+  const answer = language === 'bn' ? banglaAnswer : englishAnswer;
 
   return NextResponse.json({
     sessionId: `demo-${Date.now()}`,
