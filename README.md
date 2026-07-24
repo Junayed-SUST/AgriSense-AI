@@ -161,10 +161,13 @@ If the agent gets a 403, it surfaces the error to the chat UI gracefully — you
 
 ## Try these demo flows
 
+**0. Demo Plan button (no LLM needed — use this when OpenAI is region-blocked):**
+Click the **"Demo Plan"** button in the top-right corner. This runs all 6 tools directly (weather, RAG, recommend_crops, calendar, financials) without calling the LLM, and populates all 4 visualization tabs. Perfect for verifying the UI works without an OpenAI key.
+
 **1. Full plan in one shot (best demo flow):**
 > "I have 30 decimal in Jashore, loamy soil, tubewell water, Rabi season, budget 25000 taka. Build me a complete plan."
 
-The agent will: save profile → fetch real weather → RAG search → rank crops → build calendar → compute financials → synthesize grounded answer.
+The agent will: save profile → fetch real weather → RAG search (multiple queries) → rank crops → build calendar → compute financials → synthesize grounded answer. The right panel auto-switches to the **Crops** tab when recommendations are ready, then you can click **Calendar** and **Financials** to see dedicated visualizations.
 
 **2. Two-turn flow (demonstrates memory + adaptability):**
 > Turn 1: "I have 50 decimal in Bogura, clay soil, canal water, Aman season, budget 15000 taka. What should I plant?"
@@ -173,6 +176,42 @@ The agent will: save profile → fetch real weather → RAG search → rank crop
 **3. Incomplete info (demonstrates missing-info handling):**
 > "I want to plant something this season in Mymensingh."
 > The agent should ask for: farm size, soil type, water source, budget, and which season.
+
+## UI layout — 4 visualization tabs on the right
+
+The right panel has 4 tabs that auto-populate as the agent runs its tools:
+
+1. **🌾 Crops tab** — Card per recommended crop showing:
+   - Rank (#1 with trophy badge for top pick)
+   - Crop name + Bengali name
+   - Suitability score (0-100) with progress bar
+   - Water need badge (Low/Medium/High)
+   - Risk level badge (Low/Medium/High)
+   - ROI percentage
+   - Revenue/cost/profit per acre
+   - Rationale (top 3 reasons citing soil, water, weather, KB)
+   - Collapsible KB evidence with fact IDs and source URLs
+
+2. **📅 Calendar tab** — Timeline visualization:
+   - Crop name + sowing → harvest dates + total days
+   - Weather advisories banner (if any)
+   - Vertical timeline with day numbers, dates, stage badges, and actions
+   - Advisory callouts (e.g. "⚠ Heavy rain forecast — delay urea 2-3 days")
+
+3. **💰 Financials tab** — Full financial projection:
+   - Net profit (farm total) with ROI
+   - Summary cards: Total cost / Revenue / ROI
+   - Break-even analysis: price per maund + yield per acre
+   - Itemized cost breakdown table: every line item (NPK, Urea, TSP, MOP, Gypsum, Zinc, Seed, Labour, Irrigation, Land prep, Pest mgmt) with quantity, rate, total
+   - Per-acre and farm-total columns
+   - Scenario notes (e.g. "Sowing outside optimal window — yield may drop 10-25%")
+
+4. **🔧 Trace tab** — Every tool call with expandable details:
+   - Tool name, timestamp, duration, OK/ERROR badge
+   - Parameters sent
+   - For rag_search: retrieved facts with scores, crop, category, source URLs (clickable)
+   - For get_kb_facts_by_crop: verified facts with fact IDs and source URLs
+   - Raw return value (full JSON)
 
 ---
 
@@ -183,6 +222,8 @@ src/
 ├── app/
 │   ├── api/
 │   │   ├── chat/route.ts        — POST endpoint that runs the agent
+│   │   ├── demo-plan/route.ts   — GET endpoint that runs tools without LLM (for UI testing)
+│   │   ├── rag-test/route.ts    — GET endpoint to test RAG retriever directly
 │   │   ├── profile/route.ts     — GET farmer profile + conversation history
 │   │   └── trace/route.ts       — GET all tool-call trace entries
 │   ├── layout.tsx
