@@ -16,6 +16,7 @@ import {
   Droplets, Target, Trophy, ExternalLink, Calendar, Coins, ListChecks, Sparkles,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { ScenarioSimulator } from '@/components/ScenarioSimulator';
 
 // ---------- Types ----------
 
@@ -157,6 +158,23 @@ function newSessionId(): string {
   return `s-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+async function fetchJsonWithRetry(url: string, init?: RequestInit, retries = 1): Promise<any> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, init);
+      if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries) {
+        await new Promise(resolve => window.setTimeout(resolve, 250));
+      }
+    }
+  }
+  throw lastError;
+}
+
 // ---------- Main Component ----------
 
 export default function Home() {
@@ -180,22 +198,50 @@ export default function Home() {
   // Load history when sessionId is ready
   useEffect(() => {
     if (!sessionId) return;
+    let cancelled = false;
     (async () => {
+      const encodedSessionId = encodeURIComponent(sessionId);
       try {
-        const res = await fetch(`/api/profile?sessionId=${encodeURIComponent(sessionId)}`);
-        const data = await res.json();
+        const data = await fetchJsonWithRetry(`/api/profile?sessionId=${encodedSessionId}`);
+        if (cancelled) return;
         if (data.profile) {
           setProfile(data.profile);
           const convos = (data.conversations || []).map((c: any) => ({ role: c.role, content: c.content }));
           setMessages(convos);
         }
-        const tres = await fetch(`/api/trace?sessionId=${encodeURIComponent(sessionId)}`);
-        const tdata = await tres.json();
-        setAllTraces(tdata.trace || []);
+        setAllTraces(data.trace || []);
+      } catch (error) {
+        console.error('Failed to restore session sidebar:', error);
+      }
+
+      // Tier 1 proactive check: whenever a farmer returns, refresh the live
+      // forecast for their active saved plan and surface any matched rules.
+      try {
+        const monitorData = await fetchJsonWithRetry('/api/monitor', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+        if (cancelled) return;
+        if (monitorData.trace?.length) setAllTraces(prev => [...prev, ...monitorData.trace]);
+        if (monitorData.alerts?.length) {
+          const alertText = monitorData.alerts
+            .map((alert: any) => `- ${alert.action} (${alert.reasoning})`)
+            .join('\n');
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `### Proactive weather check\n${alertText}`,
+            trace: monitorData.trace,
+          }]);
+        }
       } catch (err) {
-        console.error('Failed to load session:', err);
+        console.error('Failed to run proactive weather check:', err);
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId]);
 
   // Auto-scroll chat
@@ -460,7 +506,7 @@ export default function Home() {
           <Card className="flex-1 flex flex-col min-h-[500px]">
             <CardHeader className="pb-2">
               <Tabs value={activeRightTab} onValueChange={setActiveRightTab}>
-                <TabsList className="grid grid-cols-4 h-9 w-full">
+                <TabsList className="grid grid-cols-5 h-9 w-full">
                   <TabsTrigger value="crops" className="text-xs gap-1">
                     <Sprout className="w-3 h-3" /> Crops
                     {latestCrops && <Badge variant="secondary" className="text-[9px] px-1 py-0 ml-1">{latestCrops.length}</Badge>}
@@ -472,6 +518,10 @@ export default function Home() {
                   <TabsTrigger value="financials" className="text-xs gap-1">
                     <Calculator className="w-3 h-3" /> Financials
                     {latestFinancials && <Badge variant="secondary" className="text-[9px] px-1 py-0 ml-1">✓</Badge>}
+                  </TabsTrigger>
+                  <TabsTrigger value="scenario" className="text-xs gap-1 text-emerald-600 font-medium">
+                    <TrendingUp className="w-3 h-3 text-emerald-600" /> Scenario Simulator
+                    <Badge className="bg-emerald-500 text-white text-[9px] px-1 py-0 ml-1">Tier 1</Badge>
                   </TabsTrigger>
                   <TabsTrigger value="trace" className="text-xs gap-1">
                     <Activity className="w-3 h-3" /> Trace
@@ -532,6 +582,13 @@ export default function Home() {
                     ) : (
                       <FinancialsView financials={latestFinancials} />
                     )}
+                  </ScrollArea>
+                </TabsContent>
+
+                {/* SCENARIO SIMULATOR TAB */}
+                <TabsContent value="scenario" className="mt-0 h-full">
+                  <ScrollArea className="h-[600px] pr-2">
+                    <ScenarioSimulator />
                   </ScrollArea>
                 </TabsContent>
 
@@ -797,7 +854,7 @@ function FinancialsView({ financials }: { financials: FinancialResult }) {
             <div className="text-xs text-stone-500 uppercase font-semibold flex items-center gap-1">
               <Coins className="w-3 h-3" /> Financial Projection
             </div>
-            <div className="font-bold text-stone-800 text-base">{f.cropName || financials.cropName}</div>
+            <div className="font-bold text-stone-800 text-base">{financials.cropName}</div>
             <div className="text-xs text-stone-500">{financials.farmSizeDecimal} decimal ({financials.farmSizeAcre} acre)</div>
           </div>
           <div className="text-right">

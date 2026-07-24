@@ -49,6 +49,7 @@ import OpenAI from 'openai';
 import { executeTool, TOOL_DEFINITIONS, type ToolName } from './tools/registry';
 import { db } from '@/lib/db';
 import { CROPS, SEASONS, SOILS } from '@/lib/kb/crops';
+import { createOrUpdateSeasonPlan, recordScenarioRun } from '@/lib/db/memory';
 
 const MAX_ITERATIONS = 10;
 
@@ -77,7 +78,7 @@ export interface AgentRunResult {
   iterations: number;
 }
 
-function buildSystemPrompt(profile: any): string {
+function buildSystemPrompt(profile: any, seasonMemory?: any): string {
   const profileText = profile
     ? Object.entries(profile)
         .filter(([_, v]) => v !== null && v !== undefined)
@@ -88,6 +89,25 @@ function buildSystemPrompt(profile: any): string {
   const cropList = CROPS.map(c => `  - ${c.id}: ${c.name} (${c.bnName}), seasons=[${c.seasons.join(',')}]`).join('\n');
   const seasonList = SEASONS.map(s => `  - ${s.id}: ${s.description}`).join('\n');
   const soilList = SOILS.map(s => `  - ${s.type}: ${s.description.slice(0, 80)}`).join('\n');
+  const seasonMemoryText = seasonMemory
+    ? JSON.stringify({
+        id: seasonMemory.id,
+        crop: seasonMemory.crop,
+        variety: seasonMemory.variety,
+        season: seasonMemory.season,
+        sowingDate: seasonMemory.sowingDate,
+        expectedHarvestDate: seasonMemory.expectedHarvestDate,
+        currentGrowthStage: seasonMemory.currentGrowthStage,
+        baselineBudgetBdt: seasonMemory.baselineBudgetBdt,
+        expectedYieldValue: seasonMemory.expectedYieldValue,
+        expectedYieldUnit: seasonMemory.expectedYieldUnit,
+        recentScenarios: seasonMemory.scenarioRuns?.slice(0, 3).map((run: any) => ({
+          scenarioType: run.scenarioType,
+          inputJson: run.inputJson,
+          outputJson: run.outputJson,
+        })),
+      }, null, 2)
+    : '(no active season plan saved yet)';
 
   return `You are **AgriSense AI**, an autonomous agricultural advisor for Bangladeshi smallholder farmers. You take a farmer from an empty field to a costed, weather-aware season plan and keep advising through harvest.
 
@@ -112,6 +132,9 @@ Every fact has a real source URL. When you cite a fact, include its source insti
 # Farmer profile (persisted in DB):
 ${profileText}
 
+# Active season plan memory (persisted across sessions):
+${seasonMemoryText}
+
 # Structured crop catalog (use exact cropId values when calling compute_financials and get_crop_calendar):
 ${cropList}
 
@@ -133,34 +156,30 @@ If any are missing, ask ONLY for the missing ones. Save any new fields immediate
 
 # STANDARD WORKFLOW (follow this for every complete plan request):
 1. If any new profile info was provided → call save_profile with the updates
-2. Call get_weather with the farmer's location
-3. Call rag_search MULTIPLE TIMES with different query angles. Examples for a wheat plan:
-   - rag_search("wheat variety BARI Gom-28 yield trait")
-   - rag_search("wheat fertilizer schedule irrigation")
-   - rag_search("wheat pest disease management blast")
-   - rag_search("wheat cultivation loamy soil rabi season")
-   Each call returns up to 8 chunks. You need broad coverage to ground every claim.
-4. Call recommend_crops with the profile + weather
-5. Present the ranked crops to the farmer. If the top recommendation is clear, proceed with it.
-6. Call get_crop_calendar with the chosen cropId + a sensible sowing date (use the season's sowing window from the KB) + the weather forecast
-7. Call compute_financials with the chosen cropId + farmSizeDecimal + sowingDate
-8. Optionally call get_kb_facts_by_crop for the chosen crop to pull all variety/fertilizer/pest facts for the recommendation
-9. Write the final integrated answer
+2. If any required intake field is still missing, ask only for those fields and stop; do not run a plan on guessed inputs.
+3. Call get_weather with the farmer's location.
+4. Call rag_search multiple times for season, soil, and candidate-crop evidence.
+5. Call recommend_crops with the complete profile + the exact get_weather result. Always show at least the top 3 candidates.
+6. Use the farmer's chosen crop. If none was chosen and they asked for a complete plan, use the rank-1 crop and clearly state that assumption; otherwise ask them to choose from the ranking.
+7. For the chosen crop, call crop-specific rag_search/get_kb_facts_by_crop, get_fertilizer_schedule, get_irrigation_schedule, assess_pest_disease_risk, and check_weather_triggers. Pass actual temperature, humidity, and rainfall from get_weather; never manufacture missing weather inputs.
+8. Call get_crop_calendar with the chosen cropId + sowing date + weather forecast. Use a farmer-provided/saved date or a sowing date supported by a retrieved crop-calendar fact; never invent a date silently.
+9. Call compute_financials with the same cropId, farmSizeDecimal, and sowingDate.
+10. If the user asks a "what if" question, call simulate_scenario and explicitly disclose its returned assumptions.
+11. Write the final integrated answer.
 
 # FINAL ANSWER FORMAT (when all tools have run):
 Write a markdown answer with these sections:
+- **Candidate Crop Ranking** — show at least 3 candidates with suitability, water need, risk, rough per-acre cost/revenue/profit, and the farm/weather inputs behind the ranking.
 - **Recommended Crop + Rationale** — name the crop AND specific variety if KB has one (e.g. "BARI Gom-28"). Cite soil match (from KB), water match (from profile + weather), budget fit (from compute_financials), and risk level.
+- **🌱 Fertilizer & Irrigation Schedule** — detailed dosages from get_fertilizer_schedule (Urea, TSP, MoP, Gypsum) and irrigation intervals from get_irrigation_schedule.
 - **📅 Season Calendar** — list 5-8 key dated events from get_crop_calendar, including any weather advisories.
-- **💰 Financial Projection** — per-acre costs (itemized), revenue, net profit, ROI, break-even price/yield. Include farm-total.
-- **⚠️ Risks & Advisories** — pests, diseases, weather triggers. Cite specific verified facts where possible (e.g. "Fall armyworm is a serious threat (BARI Maize Production Manual)").
-- **📚 Sources** — list every source used, with URLs:
-  - Weather: Open-Meteo API (with location + date)
-  - KB facts: For each cited fact, include the fact ID, source institution, source title, and URL. Example: "verified_0042 — BARI, জিংক ও বোরন সার পাতায় সিঞ্চণ প্রয়োগে টমেটো চাষ — https://baritechnology.org/m/crops/tech_detail/354"
-  - Tools called: list every tool name
+- **💰 Financial Projection & Scenario Simulation** — per-acre costs (itemized), revenue, net profit, ROI, break-even price/yield. If scenario run, show baseline vs simulated numbers.
+- **⚠️ Risks & Proactive Advisories** — pests, diseases (from assess_pest_disease_risk), weather trigger rules (from check_weather_triggers). Cite specific verified facts.
+- **📚 Sources** — list every source used with URLs (Weather API, BARI/BRRI/FAO guides, BAMIS risks).
 
 # CRITICAL RULES:
 - Do NOT write the final answer with citations to data you have not actually retrieved via tools. If a tool failed, say so explicitly.
-- Do NOT invent prices, yields, fertilizer doses, or variety names — always pull from compute_financials and rag_search.
+- Do NOT invent prices, yields, fertilizer doses, or variety names — always pull from compute_financials, get_fertilizer_schedule, and rag_search.
 - When the KB has a specific variety recommendation (e.g. "BARI Gom-28"), USE IT — don't just say "wheat".
 - Cite fact IDs in your reasoning so judges can verify each claim against the trace panel.
 - Keep answers concise but complete. Use bullet points and bold for scannability.
@@ -214,13 +233,20 @@ export async function runAgent(
     chosenCrop: farmer.chosenCrop,
     sowingDate: farmer.sowingDate,
   };
+  let seasonMemory = await db.seasonPlan.findFirst({
+    where: { farmerId: farmer.id, planStatus: 'active' },
+    orderBy: { createdAt: 'desc' },
+    include: { scenarioRuns: { orderBy: { createdAt: 'desc' }, take: 3 } },
+  });
 
   // Save user message
   await db.conversation.create({
     data: { farmerId: farmer.id, role: 'user', content: userMessage },
   });
 
-  // Load last 20 conversation messages
+  // Load last 20 conversation messages. The current user message was just
+  // persisted, so it is already part of this history and must not be appended
+  // a second time.
   const recentConvos = await db.conversation.findMany({
     where: { farmerId: farmer.id },
     orderBy: { createdAt: 'desc' },
@@ -234,11 +260,10 @@ export async function runAgent(
   }));
 
   // 2. Build the message list
-  const systemPrompt = buildSystemPrompt(profile);
+  const systemPrompt = buildSystemPrompt(profile, seasonMemory);
   const messages: any[] = [
     { role: 'system', content: systemPrompt },
     ...history,
-    { role: 'user', content: userMessage },
   ];
 
   // 3. ReAct loop
@@ -329,15 +354,69 @@ export async function runAgent(
       // Special-case save_profile: persist to DB
       if (toolName === 'save_profile' && result.updates) {
         const updates: any = {};
+        const allowedFields = new Set([
+          'name', 'location', 'latitude', 'longitude', 'farmSizeDecimal',
+          'soilType', 'waterSource', 'budgetBdt', 'targetSeason',
+          'chosenCrop', 'sowingDate',
+        ]);
         for (const [k, v] of Object.entries(result.updates as Record<string, any>)) {
+          if (!allowedFields.has(k)) continue;
           if (['farmSizeDecimal', 'budgetBdt', 'latitude', 'longitude'].includes(k)) {
             updates[k] = v !== null && v !== undefined ? Number(v) : null;
           } else {
             updates[k] = v;
           }
         }
-        await db.farmer.update({ where: { id: farmer.id }, data: updates });
-        Object.assign(profile, updates);
+        if (Object.keys(updates).length > 0) {
+          await db.farmer.update({ where: { id: farmer.id }, data: updates });
+          Object.assign(profile, updates);
+        }
+      }
+
+      // Persist the selected crop and dated plan even if the model forgets to
+      // make a separate save_profile call. This makes Tier 1 plan memory real,
+      // rather than relying only on old chat text.
+      if (toolName === 'get_crop_calendar' && !result.error) {
+        seasonMemory = await createOrUpdateSeasonPlan({
+          farmerId: farmer.id,
+          crop: result.cropName,
+          season: profile.targetSeason || undefined,
+          sowingDate: result.sowingDate,
+          expectedHarvestDate: result.harvestDate,
+        }) as any;
+        await db.farmer.update({
+          where: { id: farmer.id },
+          data: { chosenCrop: result.cropName, sowingDate: result.sowingDate },
+        });
+        profile.chosenCrop = result.cropName;
+        profile.sowingDate = result.sowingDate;
+      }
+
+      if (toolName === 'compute_financials' && !result.error) {
+        seasonMemory = await createOrUpdateSeasonPlan({
+          farmerId: farmer.id,
+          crop: result.cropName,
+          season: profile.targetSeason || undefined,
+          sowingDate: parsedArgs.sowingDate || profile.sowingDate || undefined,
+          baselineBudgetBdt: result.totals.totalCost,
+          expectedYieldValue: result.perAcre.yieldPerAcre * result.farmSizeAcre,
+          expectedYieldUnit: 'maund',
+        }) as any;
+      }
+
+      if (toolName === 'simulate_scenario' && !result.error) {
+        const activePlan = seasonMemory || await db.seasonPlan.findFirst({
+          where: { farmerId: farmer.id, planStatus: 'active' },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (activePlan) {
+          await recordScenarioRun({
+            seasonPlanId: activePlan.id,
+            scenarioType: result.scenarioType,
+            inputJson: parsedArgs,
+            outputJson: result,
+          });
+        }
       }
 
       // Append tool result back to LLM context

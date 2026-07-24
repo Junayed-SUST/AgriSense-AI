@@ -11,6 +11,13 @@ import { getWeather } from '@/lib/agent/tools/weather';
 import { recommendCrops, type FarmProfile } from '@/lib/agent/tools/recommend';
 import { computeFinancials } from '@/lib/agent/tools/financials';
 import { getCropCalendar } from '@/lib/agent/tools/calendar';
+import {
+  getFertilizerSchedule,
+  getIrrigationSchedule,
+  assessPestDiseaseRisk,
+  checkWeatherTriggers,
+  simulateScenario,
+} from '@/lib/agent/tools/tier1_tools';
 import { ragSearch, formatRetrievedContext } from '@/lib/kb/rag';
 import { CROPS } from '@/lib/kb/crops';
 import type { ToolName } from '@/lib/agent/tools/registry';
@@ -107,11 +114,15 @@ export async function GET(req: NextRequest) {
   if (!chosenCropId) chosenCropId = 'wheat'; // fallback
 
   // Compute a sensible sowing date based on season
-  const sowingDate = season === 'rabi' ? '2025-11-15'
-    : season === 'boro' ? '2026-01-15'
-    : season === 'aman' ? '2025-07-15'
-    : season === 'aus' ? '2025-04-15'
-    : '2025-05-15';
+  const seasonMonthDay: Record<string, string> = {
+    rabi: '11-15', boro: '01-15', aman: '07-15', aus: '04-15',
+    'kharif-1': '03-15', 'kharif-2': '07-15',
+  };
+  const today = new Date();
+  let sowingYear = today.getUTCFullYear();
+  const monthDay = seasonMonthDay[season] || '05-15';
+  let sowingDate = `${sowingYear}-${monthDay}`;
+  if (sowingDate < today.toISOString().slice(0, 10)) sowingDate = `${++sowingYear}-${monthDay}`;
 
   // 5. Calendar
   iter++;
@@ -136,8 +147,53 @@ export async function GET(req: NextRequest) {
   }
   trace.push(makeTraceEntry(iter, 'compute_financials', { cropId: chosenCropId, farmSizeDecimal: farmSize, sowingDate }, financials, Date.now() - finStart));
 
-  // Build a summary answer
   const chosenCropRecord = CROPS.find(c => c.id === chosenCropId);
+  const chosenCropName = chosenCropRecord?.name || topCrop?.cropName || chosenCropId;
+
+  // 7. Verified fertilizer and irrigation schedules
+  iter++;
+  const fertilizerStart = Date.now();
+  const fertilizer = getFertilizerSchedule(chosenCropName, soil, farmSize);
+  trace.push(makeTraceEntry(iter, 'get_fertilizer_schedule', { crop: chosenCropName, soilType: soil, farmSizeDecimal: farmSize }, fertilizer, Date.now() - fertilizerStart));
+
+  iter++;
+  const irrigationStart = Date.now();
+  const irrigation = getIrrigationSchedule(chosenCropName, soil, farmSize);
+  trace.push(makeTraceEntry(iter, 'get_irrigation_schedule', { crop: chosenCropName, soilType: soil, farmSizeDecimal: farmSize }, irrigation, Date.now() - irrigationStart));
+
+  // 8. Weather-grounded risk and proactive rule evaluation
+  const growthStage = chosenCropRecord?.growthStages?.[0]?.name || 'Sowing';
+  iter++;
+  const riskStart = Date.now();
+  const risk = assessPestDiseaseRisk(
+    chosenCropName,
+    growthStage,
+    weather?.summary?.avgTempC,
+    weather?.summary?.avgHumidityPercent ?? undefined,
+    weather?.summary?.totalRain7dMm,
+    farmSize,
+  );
+  trace.push(makeTraceEntry(iter, 'assess_pest_disease_risk', {
+    crop: chosenCropName,
+    growthStage,
+    temperatureC: weather?.summary?.avgTempC,
+    humidityPercent: weather?.summary?.avgHumidityPercent,
+    rainfallMm: weather?.summary?.totalRain7dMm,
+    farmSizeDecimal: farmSize,
+  }, risk, Date.now() - riskStart));
+
+  iter++;
+  const triggerStart = Date.now();
+  const triggers = checkWeatherTriggers(chosenCropName, growthStage, weather?.forecast);
+  trace.push(makeTraceEntry(iter, 'check_weather_triggers', { crop: chosenCropName, growthStage, weatherForecast: '(from get_weather)' }, triggers, Date.now() - triggerStart));
+
+  // 9. A deterministic scenario demonstrates changed, inspectable numbers.
+  iter++;
+  const scenarioStart = Date.now();
+  const scenario = simulateScenario({ cropId: chosenCropId, farmSizeDecimal: farmSize, scenarioType: 'budget_cut_percent', changeValue: 30, sowingDate });
+  trace.push(makeTraceEntry(iter, 'simulate_scenario', { cropId: chosenCropId, farmSizeDecimal: farmSize, scenarioType: 'budget_cut_percent', changeValue: 30, sowingDate }, scenario, Date.now() - scenarioStart));
+
+  // Build a summary answer
   const answer = `## Demo Plan (no LLM — tools only)
 
 **Profile**: ${farmSize} decimal in ${location}, ${soil} soil, ${water} water, ${season} season, ৳${budget.toLocaleString()} budget.
@@ -149,6 +205,8 @@ export async function GET(req: NextRequest) {
 **Calendar**: ${calendar?.totalDays || '?'} days from ${calendar?.sowingDate} to ${calendar?.harvestDate}. ${calendar?.weatherAdvisories?.length || 0} weather advisories.
 
 **Financials**: Total cost ৳${financials?.totals?.totalCost?.toLocaleString() || '?'}, revenue ৳${financials?.totals?.totalRevenue?.toLocaleString() || '?'}, profit ৳${financials?.totals?.totalProfit?.toLocaleString() || '?'}, ROI ${financials?.perAcre?.roiPercent || '?'}%.
+
+**Tier 1 checks**: ${fertilizer?.fertilizerSchedule?.length || 0} verified fertilizer quantities, ${irrigation?.irrigationRecords?.length || 0} irrigation records, ${risk?.alerts?.length || 0} pest/disease risks assessed, and ${triggers?.triggeredRulesCount || 0} proactive weather rules triggered. A 30% budget cut leaves a ৳${scenario.simulated.fundingShortfallBdt.toLocaleString()} funding shortfall without silently reducing agronomic inputs.
 
 See the Crops / Calendar / Financials tabs on the right for full visualizations. Each tool call is in the Trace tab.`;
 

@@ -260,12 +260,13 @@ The five behaviors judges will look for, and where each is implemented:
 
 ---
 
-## Known limitations & next steps (Tier 1 candidates)
+## Tier 1 status and remaining production limitations
 
-- **Persistent memory across sessions**: Currently keyed by `sessionId` stored in browser localStorage. A real auth system would let the same farmer log in from any device.
-- **Proactive weather-triggered advice**: The `get_crop_calendar` tool already emits advisories like "delay urea top dress by 2–3 days after rain", but these are reactive (generated when the plan is built). A scheduled job that re-checks weather daily and pushes alerts would make this proactive.
-- **Pest/disease risk model**: Currently the calendar lists major pests per crop; a real prediction model based on growth stage × weather × region would be more accurate.
-- **Scenario simulation**: "What if rainfall drops 30%?" — would require running `recommend_crops` and `compute_financials` with modified inputs and showing the diff.
+- **Persistent memory is implemented** for farmer profiles, conversations, active season plans, and scenario runs. Browser localStorage restores the same session after closing/reopening; production authentication would be needed to restore it on another device.
+- **Proactive forecast checks are implemented** when a farmer returns with an active plan. The app fetches fresh Open-Meteo data, evaluates verified thresholds, persists the check/alerts, and exposes both raw calls in the trace. A production deployment could additionally invoke the same endpoint from a daily scheduler and push SMS notifications.
+- **Fertilizer and irrigation scheduling is implemented** with farm-size scaling only for compatible units, context warnings for alternative AEZ/technology records, organic records when available, and inspectable planning costs.
+- **Pest/disease risk is implemented** from growth stage plus real temperature, humidity, and rainfall. Missing inputs remain explicitly insufficient; weather never confirms infestation, and chemical labels must be verified locally.
+- **Scenario simulation is implemented** for budget, rainfall, selling price, input price, and sowing-date changes. The result shows changed financial/calendar values and discloses assumptions where a verified yield or water-balance response is unavailable.
 - **bdapps Payment Gateway (Tier 2, 10 points)**: Sandbox CaaS API integration for input purchases. Documentation: https://dev.bdapps.com/API_Documentation/bdapps_tap_api.html
 - **Bengali language / voice interaction**: Currently English-only. Would require Bengali system prompt + TTS/ASR (e.g. via OpenAI Audio API or a Bengali-specific service).
 

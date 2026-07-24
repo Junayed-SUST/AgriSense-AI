@@ -8,6 +8,14 @@ import { getCropCalendar, type CropCalendarResult } from './calendar';
 import { ragSearch, formatRetrievedContext, KB_STATS, type RetrievalResult } from '@/lib/kb/rag';
 import { VERIFIED_FACTS } from '@/lib/kb/verified_facts';
 
+import {
+  getFertilizerSchedule,
+  getIrrigationSchedule,
+  assessPestDiseaseRisk,
+  checkWeatherTriggers,
+  simulateScenario,
+} from './tier1_tools';
+
 export type ToolName =
   | 'get_weather'
   | 'rag_search'
@@ -15,7 +23,12 @@ export type ToolName =
   | 'recommend_crops'
   | 'compute_financials'
   | 'get_crop_calendar'
-  | 'save_profile';
+  | 'save_profile'
+  | 'get_fertilizer_schedule'
+  | 'get_irrigation_schedule'
+  | 'assess_pest_disease_risk'
+  | 'check_weather_triggers'
+  | 'simulate_scenario';
 
 export interface ToolDefinition {
   name: ToolName;
@@ -77,6 +90,56 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     description: 'Save or update farmer profile fields (location, soilType, waterSource, budgetBdt, targetSeason, farmSizeDecimal, chosenCrop, sowingDate). Use this whenever the farmer provides new profile information so it persists across turns.',
     paramSchema: [
       { name: 'updates', type: 'string', required: true, description: 'JSON object with any subset of the profile fields to update' },
+    ],
+  },
+  {
+    name: 'get_fertilizer_schedule',
+    description: 'Retrieve verified growth-stage specific fertilizer application schedule, doses (Urea, TSP, MoP, Gypsum, etc.), organic alternatives, and costs for a crop and soil type from BARI/BRRI records.',
+    paramSchema: [
+      { name: 'crop', type: 'string', required: true, description: 'Crop name, e.g. "Potato", "Tomato", "T. Aman Rice", "Maize", "Wheat"' },
+      { name: 'soilType', type: 'string', required: false, description: 'Soil type, e.g. "sandy", "loamy", "clay"' },
+      { name: 'farmSizeDecimal', type: 'number', required: false, description: 'Farm size in decimal' },
+    ],
+  },
+  {
+    name: 'get_irrigation_schedule',
+    description: 'Retrieve growth-stage specific irrigation requirements, intervals, ETc values, and critical water deficit warnings for a crop.',
+    paramSchema: [
+      { name: 'crop', type: 'string', required: true, description: 'Crop name' },
+      { name: 'soilType', type: 'string', required: false, description: 'Soil type' },
+      { name: 'farmSizeDecimal', type: 'number', required: false, description: 'Farm size in decimal' },
+    ],
+  },
+  {
+    name: 'assess_pest_disease_risk',
+    description: 'Assess BAMIS weather-grounded pest and disease scouting risks for a crop based on growth stage and actual weather parameters. Pass temperature, humidity and rainfall from get_weather; missing inputs are reported rather than guessed.',
+    paramSchema: [
+      { name: 'crop', type: 'string', required: true, description: 'Crop name' },
+      { name: 'growthStage', type: 'string', required: false, description: 'Growth stage, e.g. "Vegetative stage", "Flowering stage"' },
+      { name: 'temperatureC', type: 'number', required: false, description: 'Current or forecast temperature in Celsius' },
+      { name: 'humidityPercent', type: 'number', required: false, description: 'Current or forecast relative humidity percentage' },
+      { name: 'rainfallMm', type: 'number', required: false, description: 'Actual forecast rainfall in millimetres from get_weather' },
+      { name: 'farmSizeDecimal', type: 'number', required: false, description: 'Farm size in decimal, used to scale the pest/IPM planning allowance' },
+    ],
+  },
+  {
+    name: 'check_weather_triggers',
+    description: 'Evaluate 7-day weather forecast against proactive trigger rules to recommend crop schedule adjustments (e.g. delay nitrogen fertilizer due to heavy rain).',
+    paramSchema: [
+      { name: 'crop', type: 'string', required: true, description: 'Crop name' },
+      { name: 'growthStage', type: 'string', required: false, description: 'Growth stage' },
+      { name: 'weatherForecast', type: 'string', required: false, description: 'JSON string of 7-day weather forecast' },
+    ],
+  },
+  {
+    name: 'simulate_scenario',
+    description: 'Run a "what if" deterministic scenario simulation (e.g. budget cut %, rainfall drop %, selling price drop %, sowing delay days) and get recalculated cost, revenue, profit, ROI, and break-even math.',
+    paramSchema: [
+      { name: 'cropId', type: 'string', required: true, description: 'Crop ID e.g. "potato", "rice-boro", "wheat"' },
+      { name: 'farmSizeDecimal', type: 'number', required: true, description: 'Farm size in decimal' },
+      { name: 'scenarioType', type: 'string', required: true, description: 'Scenario type: "budget_cut_percent", "rainfall_change_percent", "selling_price_change_percent", "input_price_change_percent", or "sowing_delay_days"' },
+      { name: 'changeValue', type: 'number', required: true, description: 'Numeric change value: use 30 for a 30% budget cut, -30 for a 30% rainfall/price drop, or 10 for a 10-day delay' },
+      { name: 'sowingDate', type: 'string', required: false, description: 'ISO sowing date e.g. "2025-11-20"' },
     ],
   },
 ];
@@ -175,7 +238,61 @@ export async function executeTool(name: ToolName, args: Record<string, any>): Pr
       }
       case 'save_profile': {
         const updates = typeof args.updates === 'string' ? JSON.parse(args.updates) : args.updates;
+        if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+          throw new Error('updates must be a JSON object');
+        }
+        const allowed = new Set(['name', 'location', 'latitude', 'longitude', 'farmSizeDecimal', 'soilType', 'waterSource', 'budgetBdt', 'targetSeason', 'chosenCrop', 'sowingDate']);
+        const unknown = Object.keys(updates).filter(key => !allowed.has(key));
+        if (unknown.length) throw new Error(`Unsupported profile field(s): ${unknown.join(', ')}`);
+        for (const key of ['farmSizeDecimal', 'budgetBdt']) {
+          if (updates[key] !== undefined && (!Number.isFinite(Number(updates[key])) || Number(updates[key]) <= 0)) {
+            throw new Error(`${key} must be a positive number`);
+          }
+        }
+        if (updates.soilType && !['sandy', 'loamy', 'clay', 'saline', 'silty'].includes(updates.soilType)) {
+          throw new Error('soilType must be sandy, loamy, clay, saline, or silty');
+        }
+        if (updates.waterSource && !['tubewell', 'canal', 'rainfed', 'river', 'pond'].includes(updates.waterSource)) {
+          throw new Error('waterSource must be tubewell, canal, rainfed, river, or pond');
+        }
+        if (updates.targetSeason && !['aus', 'aman', 'boro', 'rabi', 'kharif-1', 'kharif-2'].includes(updates.targetSeason)) {
+          throw new Error('targetSeason is not supported');
+        }
         result = { saved: true, fields: Object.keys(updates), updates };
+        break;
+      }
+      case 'get_fertilizer_schedule': {
+        result = getFertilizerSchedule(args.crop, args.soilType, Number(args.farmSizeDecimal || 100));
+        break;
+      }
+      case 'get_irrigation_schedule': {
+        result = getIrrigationSchedule(args.crop, args.soilType, Number(args.farmSizeDecimal || 100));
+        break;
+      }
+      case 'assess_pest_disease_risk': {
+        result = assessPestDiseaseRisk(
+          args.crop,
+          args.growthStage,
+          args.temperatureC ? Number(args.temperatureC) : undefined,
+          args.humidityPercent ? Number(args.humidityPercent) : undefined,
+          args.rainfallMm ? Number(args.rainfallMm) : undefined,
+          Number(args.farmSizeDecimal || 100),
+        );
+        break;
+      }
+      case 'check_weather_triggers': {
+        const wf = args.weatherForecast ? (typeof args.weatherForecast === 'string' ? JSON.parse(args.weatherForecast) : args.weatherForecast) : null;
+        result = checkWeatherTriggers(args.crop, args.growthStage, wf);
+        break;
+      }
+      case 'simulate_scenario': {
+        result = simulateScenario({
+          cropId: args.cropId,
+          farmSizeDecimal: Number(args.farmSizeDecimal || 100),
+          scenarioType: args.scenarioType,
+          changeValue: Number(args.changeValue),
+          sowingDate: args.sowingDate,
+        });
         break;
       }
       default:
