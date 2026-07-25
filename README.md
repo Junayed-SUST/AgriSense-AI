@@ -2,7 +2,7 @@
 
 > Autonomous agricultural advisor that takes a Bangladeshi smallholder farmer from an empty field to a costed, weather-aware season plan, and keeps advising through harvest.
 >
-> Built for **Bdapps Agentic AI Hackathon** at **IUT 12th ICT Fest** (24-hour build, 24–25 July 2026).
+> built by team SUST_VibeJS.
 
 ---
 
