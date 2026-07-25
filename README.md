@@ -3,6 +3,12 @@
 > Autonomous agricultural advisor that takes a Bangladeshi smallholder farmer from an empty field to a costed, weather-aware season plan, and keeps advising through harvest.
 >
 > built by team SUST_VibeJS.
+> <img width="1869" height="845" alt="image" src="https://github.com/user-attachments/assets/54324115-df7a-42ca-99cc-af09a6f3c51c" />
+<img width="1846" height="949" alt="image" src="https://github.com/user-attachments/assets/9f75f1c8-e79a-4173-a3ad-b9639a519432" />
+<img width="751" height="715" alt="image" src="https://github.com/user-attachments/assets/bbd999da-c415-4d2b-949d-ef91167782de" />
+
+
+
 
 ---
 
