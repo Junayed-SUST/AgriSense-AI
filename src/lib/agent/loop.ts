@@ -296,7 +296,7 @@ export async function runAgent(
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
-  const MODEL = process.env.OPENAI_MODEL || 'gpt-4o';
+  const MODEL = process.env.OPENAI_MODEL || 'gpt-5.1';
 
   while (iteration < MAX_ITERATIONS) {
     iteration++;
