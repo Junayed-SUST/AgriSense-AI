@@ -352,7 +352,7 @@ export default function Home() {
     setLoading(true);
     setMessages(prev => [...prev, { role: 'user', content: language === 'bn'
       ? '🌱 [ডেমো মোড] যশোর / দোআঁশ / নলকূপ / রবি / ২৫,০০০ টাকার একটি নমুনা পরিকল্পনা চালান।'
-      : '🌱 [DEMO MODE] Run a sample plan for Jashore / loamy / tubewell / Rabi / 25000 BDT — no LLM needed.' }]);
+      : '🌱 [DEMO MODE] Run a sample plan for Jashore / loamy / tubewell / Rabi / 25000 BDT ' }]);
     try {
       const res = await fetch(`/api/demo-plan?location=Jashore&farmSize=50&soil=loamy&water=tubewell&budget=25000&season=rabi&language=${language}`);
       const data = await res.json();
@@ -370,7 +370,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-stone-50 to-amber-50 flex flex-col">
       {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-10">
+      <header className="clean-header-controls border-b bg-white/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-green-700 flex items-center justify-center text-white">
@@ -378,7 +378,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-stone-800">AgriSense AI</h1>
-              <p className="text-xs text-stone-500">Bdapps Agentic AI Hackathon — IUT 12th ICT Fest</p>
+              <p className="text-xs text-stone-500">For the betterment of our farmers</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -387,13 +387,13 @@ export default function Home() {
               <button onClick={() => changeLanguage('en')} className={`rounded px-2 py-1 text-xs font-medium ${language === 'en' ? 'bg-green-700 text-white' : 'text-stone-600 hover:bg-stone-100'}`}>English</button>
               <button onClick={() => changeLanguage('bn')} className={`rounded px-2 py-1 text-xs font-medium ${language === 'bn' ? 'bg-green-700 text-white' : 'text-stone-600 hover:bg-stone-100'}`}>বাংলা</button>
             </div>
-            <Badge variant="outline" className="bg-amber-50 border-amber-300 text-amber-800">{language === 'bn' ? 'টিয়ার ০ — মূল সংস্করণ' : 'Tier 0 — Core Build'}</Badge>
-            <Badge variant="outline" className="bg-violet-50 border-violet-300 text-violet-800">{language === 'bn' ? '🔬 রোগ নির্ণয় AI (৩৮ ক্লাস)' : '🔬 Disease Classifier (PlantVillage)'}</Badge>
-            <Badge variant="outline" className="bg-emerald-50 border-emerald-300 text-emerald-800">{language === 'bn' ? '১০০০+ যাচাইকৃত তথ্য' : '1000+ verified facts'} (BARI · BWMRI · BRRI · FAO)</Badge>
-            <Button variant="outline" size="sm" onClick={runDemoPlan} disabled={loading} title={language === 'bn' ? 'AI মডেল ছাড়াই একটি নমুনা পরিকল্পনা চালান' : 'Run a sample plan without the LLM'}>
+            {/* <Badge variant="outline" className="bg-amber-50 border-amber-300 text-amber-800">{language === 'bn' ? 'টিয়ার ০ — মূল সংস্করণ' : 'Tier 0 — Core Build'}</Badge> */}
+            {/* <Badge variant="outline" className="bg-violet-50 border-violet-300 text-violet-800">{language === 'bn' ? '🔬 GPT রোগ বিশ্লেষণ' : '🔬 GPT Disease Analysis'}</Badge> */}
+            {/* <Badge variant="outline" className="bg-emerald-50 border-emerald-300 text-emerald-800">{language === 'bn' ? '১০০০+ যাচাইকৃত তথ্য' : '1000+ verified facts'} (BARI · BWMRI · BRRI · FAO)</Badge> */}
+            {/* <Button variant="outline" size="sm" onClick={runDemoPlan} disabled={loading} title={language === 'bn' ? 'AI মডেল ছাড়াই একটি নমুনা পরিকল্পনা চালান' : 'Run a sample plan without the LLM'}>
               <Sparkles className="w-3.5 h-3.5 mr-1.5" />
               {language === 'bn' ? 'ডেমো পরিকল্পনা' : 'Demo Plan'}
-            </Button>
+            </Button> */}
             <Button variant="outline" size="sm" onClick={startNewSession}>
               <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
               {language === 'bn' ? 'নতুন কৃষক' : 'New Farmer'}
@@ -663,7 +663,7 @@ export default function Home() {
                 {/* PLANT DISEASE DETECTION TAB */}
                 <TabsContent value="disease" className="mt-0 h-full">
                   <ScrollArea className="h-[600px] pr-2">
-                    <PlantDiseaseDetector language={language} />
+                    <PlantDiseaseDetector language={language} sessionId={sessionId} cropHint={profile?.chosenCrop} />
                   </ScrollArea>
                 </TabsContent>
 
@@ -694,7 +694,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t bg-white/60 py-3">
         <div className="max-w-[1800px] mx-auto px-4 text-center text-xs text-stone-500">
-          {language === 'bn' ? 'Open-Meteo-এর বাস্তব আবহাওয়া · সরকারি DAM বাজার তথ্য · মক সরবরাহকারী বাজার · BARI · BWMRI · BRRI · FAO-এর ১০০০+ যাচাইকৃত তথ্য' : 'Real weather via Open-Meteo · Official DAM market data · Mock supplier marketplace · 1000+ verified facts from BARI · BWMRI · BRRI · FAO · Built for Bdapps Agentic AI Hackathon'}
+          {language === 'bn' ? 'Cultivate and Grow A better Bangladesh' : 'Cultivate and Grow A better Bangladesh'}
         </div>
       </footer>
     </div>
