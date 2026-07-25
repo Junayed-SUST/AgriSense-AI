@@ -230,10 +230,15 @@ function expandQuery(tokens: string[]): string[] {
 function tokenize(text: string): string[] {
   const raw = text
     .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
+    // Preserve Bengali Unicode (\u0980-\u09FF) alongside Latin alphanumerics
+    .replace(/[^a-z0-9\u0980-\u09FF\s]/g, ' ')
     .split(/\s+/)
     .filter(t => t.length > 1);
-  return raw.map(stem);
+  return raw.map(t => {
+    // Only stem Latin tokens, leave Bengali tokens as-is
+    if (/^[a-z0-9]+$/.test(t)) return stem(t);
+    return t;
+  });
 }
 
 // ---------- TF-IDF ----------
@@ -297,10 +302,42 @@ export function ragSearch(query: string, topK = 8): RetrievalResult[] {
   const expandedTokens = expandQuery(qTokens);
   const qVec = tfidfVector(expandedTokens);
 
-  const scored = DOC_VECS.map((docVec, idx) => ({
-    chunk: ALL_CORPUS[idx],
-    score: cosine(qVec, docVec),
-  }));
+  // Category boost map: if query contains these keywords, boost matching chunks
+  const CATEGORY_BOOST_MAP: Record<string, string[]> = {
+    'fertilize': ['Fertilizer'],
+    'urea': ['Fertilizer'],
+    'tsp': ['Fertilizer'],
+    'irrigate': ['Irrigation'],
+    'water': ['Irrigation'],
+    'pest': ['Pest management'],
+    'diseas': ['Pest management'],
+    'insect': ['Pest management'],
+    'calendar': ['Crop calendar'],
+    'sow': ['Crop calendar'],
+    'harvest': ['Crop calendar'],
+    'soil': ['Soil'],
+    'sand': ['Soil'],
+    'clay': ['Soil'],
+    'loam': ['Soil'],
+    'season': ['Season classification'],
+    'variet': ['Fertilizer', 'Crop calendar'],
+  };
+  const detectedCategories = new Set<string>();
+  for (const t of expandedTokens) {
+    const boostCats = CATEGORY_BOOST_MAP[t];
+    if (boostCats) boostCats.forEach(c => detectedCategories.add(c));
+  }
+  const CATEGORY_BOOST_FACTOR = 1.5;
+
+  const scored = DOC_VECS.map((docVec, idx) => {
+    let score = cosine(qVec, docVec);
+    // Apply category boost if the chunk's category matches detected keywords
+    const chunk = ALL_CORPUS[idx];
+    if (detectedCategories.size > 0 && chunk.category && detectedCategories.has(chunk.category)) {
+      score *= CATEGORY_BOOST_FACTOR;
+    }
+    return { chunk, score };
+  });
 
   scored.sort((a, b) => b.score - a.score);
 
