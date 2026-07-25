@@ -2,7 +2,13 @@
 
 > Autonomous agricultural advisor that takes a Bangladeshi smallholder farmer from an empty field to a costed, weather-aware season plan, and keeps advising through harvest.
 >
-> Built for **Bdapps Agentic AI Hackathon** at **IUT 12th ICT Fest** (24-hour build, 24–25 July 2026).
+> built by team SUST_VibeJS.
+> <img width="1869" height="845" alt="image" src="https://github.com/user-attachments/assets/54324115-df7a-42ca-99cc-af09a6f3c51c" />
+<img width="1846" height="949" alt="image" src="https://github.com/user-attachments/assets/9f75f1c8-e79a-4173-a3ad-b9639a519432" />
+<img width="751" height="715" alt="image" src="https://github.com/user-attachments/assets/bbd999da-c415-4d2b-949d-ef91167782de" />
+
+
+
 
 ---
 
@@ -273,22 +279,10 @@ The five behaviors judges will look for, and where each is implemented:
 
 ---
 
-## Tier 1 status and remaining production limitations
 
-- **Persistent memory is implemented** for farmer profiles, conversations, active season plans, and scenario runs. Browser localStorage restores the same session after closing/reopening; production authentication would be needed to restore it on another device.
-- **Proactive forecast checks are implemented** when a farmer returns with an active plan. The app fetches fresh Open-Meteo data, evaluates verified thresholds, persists the check/alerts, and exposes both raw calls in the trace. A production deployment could additionally invoke the same endpoint from a daily scheduler and push SMS notifications.
-- **Fertilizer and irrigation scheduling is implemented** with farm-size scaling only for compatible units, context warnings for alternative AEZ/technology records, organic records when available, and inspectable planning costs.
-- **Pest/disease risk is implemented** from growth stage plus real temperature, humidity, and rainfall. Missing inputs remain explicitly insufficient; weather never confirms infestation, and chemical labels must be verified locally.
-- **Scenario simulation is implemented** for budget, rainfall, selling price, input price, and sowing-date changes. The result shows changed financial/calendar values and discloses assumptions where a verified yield or water-balance response is unavailable.
-- **Tier 2 marketplace is implemented** with deterministic package rounding, stock enforcement, total delivered cost, excess quantity, normalized weighted ranking, and plan-derived input quantities. Every mock field is labeled in both tool output and UI.
-- **Tier 2 market intelligence is implemented** with a resilient live DAM ticker reader, official historical monthly series, explicit commodity/subgroup matching, and inspectable sell-now/store-or-wait/monitor formulas. Forecasts are assumptions, never guarantees, and incompatible units or price types are not mixed.
-- **bdapps Payment Gateway (Tier 2, 10 points)**: Sandbox CaaS API integration for input purchases. Documentation: https://dev.bdapps.com/API_Documentation/bdapps_tap_api.html
-- **Bengali language / voice interaction**: Currently English-only. Would require Bengali system prompt + TTS/ASR (e.g. via OpenAI Audio API or a Bengali-specific service).
-
----
 
 ## License
 
-Built during the 24-hour hackathon window. Uses open-source libraries (Next.js, Prisma, React, shadcn/ui, Tailwind, OpenAI Node SDK). Calls OpenAI's GPT-4o API (requires your own key).
+Built during the 24-hour hackathon window. Uses open-source libraries (Next.js, Prisma, React, shadcn/ui, Tailwind, OpenAI Node SDK). Calls OpenAI's GPT-5.1 API (requires your own key).
 
 Knowledge base data is curated from publicly available Bangladesh government publications (BARC, DAE, BARI, BBS) under fair use for educational purposes.

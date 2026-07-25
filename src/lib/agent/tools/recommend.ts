@@ -59,7 +59,61 @@ const CROP_FAMILY_MAP: Record<string, string> = {
   'chili': 'Solanaceae',
   'mustard': 'Brassicaceae',
   'lentil': 'Fabaceae',
+  'mungbean': 'Fabaceae',
+  'groundnut': 'Fabaceae',
+  'sesame': 'Pedaliaceae',
+  'okra': 'Malvaceae',
+  'cucumber': 'Cucurbitaceae',
+  'onion': 'Amaryllidaceae',
 };
+
+const MIN_RECOMMENDATIONS = 3;
+const MAX_RECOMMENDATIONS = 5;
+
+type CandidateSeasonFit = 'exact' | 'nearby' | 'fallback';
+
+interface CandidateEntry {
+  crop: CropRecord;
+  seasonFit: CandidateSeasonFit;
+  backfillSeason?: Season;
+}
+
+const SEASON_BACKFILL_ORDER: Record<Season, Season[]> = {
+  aus: ['kharif-1', 'aman', 'rabi'],
+  aman: ['kharif-2', 'aus', 'rabi'],
+  boro: ['rabi', 'aus', 'kharif-1'],
+  rabi: ['boro', 'kharif-1', 'kharif-2'],
+  'kharif-1': ['aus', 'rabi', 'kharif-2'],
+  'kharif-2': ['aman', 'kharif-1', 'rabi'],
+};
+
+function buildSeasonCandidates(season: Season): CandidateEntry[] {
+  const selected = new Map<string, CandidateEntry>();
+
+  for (const crop of getCropsForSeason(season)) {
+    selected.set(crop.id, { crop, seasonFit: 'exact' });
+  }
+
+  for (const nearbySeason of SEASON_BACKFILL_ORDER[season] || []) {
+    if (selected.size >= MIN_RECOMMENDATIONS) break;
+
+    for (const crop of getCropsForSeason(nearbySeason)) {
+      if (selected.size >= MIN_RECOMMENDATIONS) break;
+      if (!selected.has(crop.id)) {
+        selected.set(crop.id, { crop, seasonFit: 'nearby', backfillSeason: nearbySeason });
+      }
+    }
+  }
+
+  for (const crop of CROPS) {
+    if (selected.size >= MIN_RECOMMENDATIONS) break;
+    if (!selected.has(crop.id)) {
+      selected.set(crop.id, { crop, seasonFit: 'fallback' });
+    }
+  }
+
+  return Array.from(selected.values());
+}
 
 // Parse sowing window string (e.g. "Nov 1 – Dec 15") into month range [startMonth, endMonth] (1-indexed)
 const MONTH_MAP: Record<string, number> = {
@@ -82,6 +136,44 @@ function isMonthInRange(month: number, start: number, end: number): boolean {
   return month >= start || month <= end;
 }
 
+interface CropFinancialAssumption {
+  yieldFactor: number;
+  priceFactor: number;
+  harvestMarketingCostBdt: number;
+}
+
+const DEFAULT_FINANCIAL_ASSUMPTION: CropFinancialAssumption = {
+  yieldFactor: 0.9,
+  priceFactor: 0.85,
+  harvestMarketingCostBdt: 3500,
+};
+
+const CROP_FINANCIAL_ASSUMPTIONS: Record<string, CropFinancialAssumption> = {
+  'rice-boro': { yieldFactor: 0.92, priceFactor: 0.9, harvestMarketingCostBdt: 4500 },
+  'rice-aman': { yieldFactor: 0.92, priceFactor: 0.9, harvestMarketingCostBdt: 4200 },
+  'rice-aus': { yieldFactor: 0.88, priceFactor: 0.88, harvestMarketingCostBdt: 3500 },
+  'wheat': { yieldFactor: 0.88, priceFactor: 0.86, harvestMarketingCostBdt: 3500 },
+  'maize': { yieldFactor: 0.9, priceFactor: 0.85, harvestMarketingCostBdt: 4500 },
+  'jute': { yieldFactor: 0.88, priceFactor: 0.85, harvestMarketingCostBdt: 9000 },
+  'potato': { yieldFactor: 0.82, priceFactor: 0.72, harvestMarketingCostBdt: 16000 },
+  'tomato': { yieldFactor: 0.72, priceFactor: 0.62, harvestMarketingCostBdt: 22000 },
+  'brinjal': { yieldFactor: 0.75, priceFactor: 0.65, harvestMarketingCostBdt: 20000 },
+  'chili': { yieldFactor: 0.78, priceFactor: 0.68, harvestMarketingCostBdt: 14000 },
+  'okra': { yieldFactor: 0.76, priceFactor: 0.68, harvestMarketingCostBdt: 15000 },
+  'cucumber': { yieldFactor: 0.76, priceFactor: 0.65, harvestMarketingCostBdt: 16000 },
+  'onion': { yieldFactor: 0.82, priceFactor: 0.7, harvestMarketingCostBdt: 14000 },
+};
+
+function getFinancialAssumption(crop: CropRecord): CropFinancialAssumption {
+  return CROP_FINANCIAL_ASSUMPTIONS[crop.id] || DEFAULT_FINANCIAL_ASSUMPTION;
+}
+
+function getContingencyRate(crop: CropRecord): number {
+  if (crop.riskLevel === 'high') return 0.12;
+  if (crop.riskLevel === 'medium') return 0.1;
+  return 0.08;
+}
+
 function computePerAcreCost(crop: CropRecord): number {
   const f = crop.fertilizerKgPerAcre;
   const c = INPUT_COSTS;
@@ -99,11 +191,16 @@ function computePerAcreCost(crop: CropRecord): number {
     'rice-boro': 25, 'rice-aman': 22, 'rice-aus': 30,
     'wheat': 50, 'maize': 25, 'potato': 700, 'mustard': 6,
     'lentil': 25, 'jute': 7, 'tomato': 0.3, 'brinjal': 0.3, 'chili': 0.5,
+    'mungbean': 10, 'sesame': 3, 'okra': 4, 'cucumber': 0.5,
+    'onion': 4, 'groundnut': 45,
   };
   const seedUnit: Record<string, number> = {
     'rice-boro': c.seedRicePerKg, 'rice-aman': c.seedRicePerKg, 'rice-aus': c.seedRicePerKg,
     'wheat': c.seedWheatPerKg, 'maize': c.seedMaizePerKg, 'potato': c.seedPotatoPerKg,
     'mustard': c.seedMustardPerKg, 'lentil': c.seedLentilPerKg, 'jute': c.seedJutePerKg,
+    'mungbean': c.seedMungbeanPerKg, 'sesame': c.seedSesamePerKg,
+    'okra': c.seedOkraPerKg, 'cucumber': c.seedCucumberPerKg,
+    'onion': c.seedOnionPerKg, 'groundnut': c.seedGroundnutPerKg,
     'tomato': c.seedTomatoPer10g * 100, 'brinjal': c.seedBrinjalPer10g * 100,
     'chili': c.seedChiliPer10g * 100,
   };
@@ -114,6 +211,8 @@ function computePerAcreCost(crop: CropRecord): number {
     'rice-boro': 35, 'rice-aman': 30, 'rice-aus': 18,
     'wheat': 18, 'maize': 22, 'potato': 50, 'mustard': 14,
     'lentil': 12, 'jute': 45, 'tomato': 70, 'brinjal': 75, 'chili': 80,
+    'mungbean': 14, 'sesame': 16, 'okra': 55, 'cucumber': 50,
+    'onion': 60, 'groundnut': 28,
   };
   cost += (labourDays[crop.id] || 20) * c.labourPerDay;
 
@@ -122,6 +221,8 @@ function computePerAcreCost(crop: CropRecord): number {
     'rice-boro': 18, 'rice-aman': 4, 'rice-aus': 2,
     'wheat': 3, 'maize': 4, 'potato': 5, 'mustard': 2,
     'lentil': 1, 'jute': 2, 'tomato': 12, 'brinjal': 14, 'chili': 10,
+    'mungbean': 1, 'sesame': 1, 'okra': 6, 'cucumber': 7,
+    'onion': 6, 'groundnut': 4,
   };
   cost += (irrigEvents[crop.id] || 3) * c.irrigationPerApplication;
 
@@ -133,18 +234,71 @@ function computePerAcreCost(crop: CropRecord): number {
     'rice-boro': 1500, 'rice-aman': 1000, 'rice-aus': 600,
     'wheat': 800, 'maize': 1200, 'potato': 3000, 'mustard': 600,
     'lentil': 800, 'jute': 1000, 'tomato': 4500, 'brinjal': 5000, 'chili': 5500,
+    'mungbean': 900, 'sesame': 800, 'okra': 3000, 'cucumber': 3200,
+    'onion': 3500, 'groundnut': 1200,
   };
   cost += pestCost[crop.id] || 1000;
+
+  const assumption = getFinancialAssumption(crop);
+  cost += assumption.harvestMarketingCostBdt;
+  cost += cost * getContingencyRate(crop);
 
   return Math.round(cost);
 }
 
 function computePerAcreRevenue(crop: CropRecord): { revenueBdt: number; yieldMaund: number } {
-  // Use midpoint yield and midpoint price (conservative)
-  const yieldMaund = (crop.typicalYieldPerAcre.min + crop.typicalYieldPerAcre.max) / 2;
-  const priceMid = (crop.typicalPricePerUnit.min + crop.typicalPricePerUnit.max) / 2;
+  // Use conservative farmgate assumptions: not every acre reaches midpoint yield,
+  // and harvest-time farmgate price is usually below retail/season-average price.
+  const assumption = getFinancialAssumption(crop);
+  const yieldMaund = ((crop.typicalYieldPerAcre.min + crop.typicalYieldPerAcre.max) / 2) * assumption.yieldFactor;
+  const priceMid = ((crop.typicalPricePerUnit.min + crop.typicalPricePerUnit.max) / 2) * assumption.priceFactor;
   const revenueBdt = Math.round(yieldMaund * priceMid);
   return { revenueBdt, yieldMaund };
+}
+
+function applyWeatherScore(crop: CropRecord, weather: WeatherResult): { delta: number; rationale: string[] } {
+  let delta = 0;
+  const rationale: string[] = [];
+  const totalRain7d = weather.summary.totalRain7dMm;
+  const rainyDays = weather.summary.rainyDays;
+  const avgHumidity = weather.summary.avgHumidityPercent;
+  const avgTemp = weather.summary.avgTempC;
+
+  if (crop.rainfallTolerance === 'low' && totalRain7d > 50) {
+    delta -= 12;
+    rationale.push(`Weather: ${totalRain7d.toFixed(0)} mm rain in the next 7 days raises waterlogging/disease risk for ${crop.name}.`);
+  } else if (crop.rainfallTolerance === 'medium' && totalRain7d > 90) {
+    delta -= 8;
+    rationale.push(`Weather: ${totalRain7d.toFixed(0)} mm rain is a bit high for ${crop.name}; drainage will be important.`);
+  } else if (crop.rainfallTolerance === 'high' && totalRain7d >= 25 && totalRain7d <= 120) {
+    delta += 6;
+    rationale.push(`Weather: ${totalRain7d.toFixed(0)} mm rain supports ${crop.name}, which handles wet conditions better than many crops.`);
+  }
+
+  if (rainyDays >= 5 && crop.riskLevel === 'high') {
+    delta -= 8;
+    rationale.push(`Weather: rain on ${rainyDays} of 7 days increases pest and fungal pressure for this higher-risk crop.`);
+  }
+
+  if (avgHumidity !== null && avgHumidity >= 85) {
+    if (crop.riskLevel === 'high') {
+      delta -= 8;
+      rationale.push(`Weather: average humidity ${avgHumidity.toFixed(0)}% is disease-friendly, so ${crop.name}'s risk is adjusted down.`);
+    } else if (crop.rainfallTolerance === 'low') {
+      delta -= 4;
+      rationale.push(`Weather: average humidity ${avgHumidity.toFixed(0)}% adds disease risk for low-rainfall-tolerance crops.`);
+    }
+  }
+
+  if (avgTemp > 33 && ['wheat', 'potato', 'tomato'].includes(crop.id)) {
+    delta -= 8;
+    rationale.push(`Weather: average temperature ${avgTemp.toFixed(1)}°C is stressful for ${crop.name}.`);
+  } else if (avgTemp >= 24 && avgTemp <= 32 && ['jute', 'maize', 'brinjal', 'okra', 'cucumber'].includes(crop.id)) {
+    delta += 3;
+    rationale.push(`Weather: average temperature ${avgTemp.toFixed(1)}°C is broadly suitable for warm-season ${crop.name}.`);
+  }
+
+  return { delta, rationale };
 }
 
 export async function recommendCrops(profile: FarmProfile, weather: WeatherResult | null): Promise<RecommendResult> {
@@ -152,20 +306,28 @@ export async function recommendCrops(profile: FarmProfile, weather: WeatherResul
     throw new Error('farmSizeDecimal must be a positive number before recommending crops');
   }
   const season = (profile.targetSeason || 'rabi') as Season;
-  let candidates = getCropsForSeason(season);
-
-  // Fallback: if no candidates (shouldn't happen), use all crops
-  if (candidates.length === 0) candidates = CROPS.slice();
+  const candidateEntries = buildSeasonCandidates(season);
+  const hasBackfilledCandidates = candidateEntries.some(entry => entry.seasonFit !== 'exact');
 
   // Get the current month for sowing window fitness check
   const currentMonth = new Date().getMonth() + 1; // 1-indexed
   const seasonRecord = SEASONS.find(s => s.id === season);
 
   // Score each candidate
-  const scored = candidates.map(crop => {
+  const scored = candidateEntries.map(({ crop, seasonFit, backfillSeason }) => {
     let score = 50; // baseline
     const rationale: string[] = [];
     const kbEvidence: string[] = [];
+
+    if (seasonFit === 'exact') {
+      rationale.push(`${crop.name} is listed for the ${season} season in the crop knowledge base.`);
+    } else if (seasonFit === 'nearby' && backfillSeason) {
+      score -= 8;
+      rationale.push(`${crop.name} is a nearby-season option from ${backfillSeason}; included because exact ${season} options are limited. Confirm local sowing timing before planting.`);
+    } else {
+      score -= 18;
+      rationale.push(`${crop.name} is a fallback crop, not a direct ${season} match. Use only if local DAE/extension advice confirms the timing.`);
+    }
 
     // 1. Soil suitability (+20 if soil is in suitable list, -20 if not)
     if (profile.soilType) {
@@ -183,7 +345,7 @@ export async function recommendCrops(profile: FarmProfile, weather: WeatherResul
     }
 
     // 2. Water availability match (+15 / -15)
-    if (profile.waterSource && weather) {
+    if (profile.waterSource) {
       const prefSources = crop.waterSourcePreference;
       if (prefSources.includes(profile.waterSource)) {
         score += 15;
@@ -193,6 +355,7 @@ export async function recommendCrops(profile: FarmProfile, weather: WeatherResul
         rationale.push(`${crop.name} needs ${crop.waterNeedMm} mm/season — too much for rainfed-only supply in your area.`);
       }
 
+      /*
       // Weather check: heavy rain forecast for a low-rainfall-tolerance crop = bad
       const totalRain7d = weather.summary.totalRain7dMm;
       if (crop.rainfallTolerance === 'low' && totalRain7d > 50) {
@@ -202,6 +365,13 @@ export async function recommendCrops(profile: FarmProfile, weather: WeatherResul
         score += 5;
         rationale.push(`Weather: ${totalRain7d.toFixed(0)} mm rain forecast — favorable for ${crop.name} (high rainfall tolerance).`);
       }
+      */
+    }
+
+    if (weather) {
+      const weatherFit = applyWeatherScore(crop, weather);
+      score += weatherFit.delta;
+      rationale.push(...weatherFit.rationale);
     }
 
     // 3. Budget fit
@@ -228,7 +398,7 @@ export async function recommendCrops(profile: FarmProfile, weather: WeatherResul
     if (roi > 80) score += 15;
     else if (roi > 40) score += 8;
     else if (roi < 0) score -= 15;
-    rationale.push(`Expected ROI ${roi.toFixed(0)}% (revenue ৳${revenueBdt.toLocaleString()}/acre − cost ৳${perAcreCost.toLocaleString()}/acre).`);
+    rationale.push(`Conservative expected ROI ${roi.toFixed(0)}% (farmgate revenue ৳${revenueBdt.toLocaleString()}/acre − realistic cost ৳${perAcreCost.toLocaleString()}/acre).`);
     kbEvidence.push(`${crop.name} typical yield ${crop.typicalYieldPerAcre.min}-${crop.typicalYieldPerAcre.max} ${crop.typicalYieldPerAcre.unit}/acre; price ৳${crop.typicalPricePerUnit.min}-${crop.typicalPricePerUnit.max}/${crop.typicalPricePerUnit.unit}. Source: ${crop.source}.`);
 
     // 5. Risk adjustment
@@ -316,14 +486,15 @@ export async function recommendCrops(profile: FarmProfile, weather: WeatherResul
 
   // Sort by score desc, take top 3+, assign ranks
   scored.sort((a, b) => b.suitabilityScore - a.suitabilityScore);
-  const top = scored.slice(0, Math.min(5, scored.length)).filter(r => r.suitabilityScore > 0);
+  const positiveRecommendations = scored.filter(r => r.suitabilityScore > 0);
+  const topSource = positiveRecommendations.length >= MIN_RECOMMENDATIONS ? positiveRecommendations : scored;
+  const top = topSource.slice(0, Math.min(MAX_RECOMMENDATIONS, topSource.length));
   top.forEach((r, i) => (r.rank = i + 1));
 
   return {
     profile,
     weather,
     recommendations: top,
-    notes: `Ranked ${top.length} candidate crops for ${season} season using soil=${profile.soilType || '?'}, water=${profile.waterSource || '?'}, budget=৳${profile.budgetBdt?.toLocaleString() || '?'}, farm size=${profile.farmSizeDecimal || '?'} decimal. Scores combine soil fit, water match, budget fit, ROI, risk, sowing window, rotation, and market risk.`,
+    notes: `Ranked ${top.length} candidate crops for ${season} season using soil=${profile.soilType || '?'}, water=${profile.waterSource || '?'}, budget=৳${profile.budgetBdt?.toLocaleString() || '?'}, farm size=${profile.farmSizeDecimal || '?'} decimal. Scores combine soil fit, water match, budget fit, ROI, risk, sowing window, rotation, and market risk.${hasBackfilledCandidates ? ' Exact season matches were limited, so nearby-season crops were included with a season-fit penalty to keep at least 3 practical options.' : ''}`,
   };
 }
-

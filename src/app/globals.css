@@ -120,3 +120,14 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  .clean-header-controls,
+  .clean-header-controls * {
+    text-decoration: none !important;
+    text-decoration-line: none !important;
+    text-decoration-color: transparent !important;
+    -webkit-text-decoration-line: none !important;
+    text-underline-offset: 0 !important;
+  }
+}

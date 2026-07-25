@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   keywords: ["AgriSense", "AI", "agriculture", "Bangladesh", "agent", "RAG", "Open-Meteo", "BARC", "DAE"],
   authors: [{ name: "Team AgriSense" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "https://scontent.fdac174-1.fna.fbcdn.net/v/t39.30808-6/749652173_1721619442364288_6037650805412570207_n.jpg?stp=dst-jpg_tt6&cstp=mx233x194&ctp=s233x194&_nc_cat=106&ccb=1-7&_nc_sid=127cfc&_nc_eui2=AeEPKnxdXYdkPhbuxdTX0nOJS_P0UQSncMFL8_RRBKdwwYXjWtJdkbPR12DcJtWAkts00Bn831ciiTvUUF2kEMqN&_nc_ohc=mg7XSjCyX7YQ7kNvwEcdCv1&_nc_oc=AdrWUzpnjg1J9Gx4jSFufgise4EH2W7a9AaxJZnljasarElwGbjXfRJ4Txrg3HMgNbc&_nc_zt=23&_nc_ht=scontent.fdac174-1.fna&_nc_gid=LQMcZg2-FEoLEp-45hxjfw&_nc_ss=7b2a8&oh=00_AQCfsvS-9Hb5NzmmoVDv85zOZSkRaKM8ai0c66DpU1_Qtw&oe=6A69F8F9",
   },
 };
 

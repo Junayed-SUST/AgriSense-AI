@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type AnchorHTMLAttributes, type ReactNode } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -158,6 +158,36 @@ const WATER_COLORS: Record<string, string> = {
   low: 'bg-sky-100 text-sky-700 border-sky-300',
   medium: 'bg-blue-100 text-blue-700 border-blue-300',
   high: 'bg-indigo-100 text-indigo-700 border-indigo-300',
+};
+
+const MARKDOWN_COMPONENTS = {
+  a: ({ href, children, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { children?: ReactNode }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-1.5 py-0.5 font-semibold text-emerald-800 underline decoration-emerald-300 underline-offset-2 transition hover:bg-emerald-100 hover:text-emerald-950"
+      {...props}
+    >
+      {children}
+      <ExternalLink className="h-3 w-3 shrink-0" />
+    </a>
+  ),
+  table: ({ children }: { children?: ReactNode }) => (
+    <div className="my-3 overflow-x-auto rounded-xl border border-stone-200 bg-white">
+      <table className="min-w-full text-sm">{children}</table>
+    </div>
+  ),
+  th: ({ children }: { children?: ReactNode }) => (
+    <th className="bg-stone-50 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-stone-600">
+      {children}
+    </th>
+  ),
+  td: ({ children }: { children?: ReactNode }) => (
+    <td className="border-t border-stone-100 px-3 py-2 align-top text-stone-700">
+      {children}
+    </td>
+  ),
 };
 
 function newSessionId(): string {
@@ -352,7 +382,7 @@ export default function Home() {
     setLoading(true);
     setMessages(prev => [...prev, { role: 'user', content: language === 'bn'
       ? '🌱 [ডেমো মোড] যশোর / দোআঁশ / নলকূপ / রবি / ২৫,০০০ টাকার একটি নমুনা পরিকল্পনা চালান।'
-      : '🌱 [DEMO MODE] Run a sample plan for Jashore / loamy / tubewell / Rabi / 25000 BDT — no LLM needed.' }]);
+      : '🌱 [DEMO MODE] Run a sample plan for Jashore / loamy / tubewell / Rabi / 25000 BDT ' }]);
     try {
       const res = await fetch(`/api/demo-plan?location=Jashore&farmSize=50&soil=loamy&water=tubewell&budget=25000&season=rabi&language=${language}`);
       const data = await res.json();
@@ -370,7 +400,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-stone-50 to-amber-50 flex flex-col">
       {/* Header */}
-      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-10">
+      <header className="clean-header-controls border-b bg-white/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-green-700 flex items-center justify-center text-white">
@@ -378,7 +408,7 @@ export default function Home() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-stone-800">AgriSense AI</h1>
-              <p className="text-xs text-stone-500">Bdapps Agentic AI Hackathon — IUT 12th ICT Fest</p>
+              <p className="text-xs text-stone-500">For the betterment of our farmers</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -387,13 +417,13 @@ export default function Home() {
               <button onClick={() => changeLanguage('en')} className={`rounded px-2 py-1 text-xs font-medium ${language === 'en' ? 'bg-green-700 text-white' : 'text-stone-600 hover:bg-stone-100'}`}>English</button>
               <button onClick={() => changeLanguage('bn')} className={`rounded px-2 py-1 text-xs font-medium ${language === 'bn' ? 'bg-green-700 text-white' : 'text-stone-600 hover:bg-stone-100'}`}>বাংলা</button>
             </div>
-            <Badge variant="outline" className="bg-amber-50 border-amber-300 text-amber-800">{language === 'bn' ? 'টিয়ার ০ — মূল সংস্করণ' : 'Tier 0 — Core Build'}</Badge>
-            <Badge variant="outline" className="bg-violet-50 border-violet-300 text-violet-800">{language === 'bn' ? '🔬 রোগ নির্ণয় AI (৩৮ ক্লাস)' : '🔬 Disease Classifier (PlantVillage)'}</Badge>
-            <Badge variant="outline" className="bg-emerald-50 border-emerald-300 text-emerald-800">{language === 'bn' ? '১০০০+ যাচাইকৃত তথ্য' : '1000+ verified facts'} (BARI · BWMRI · BRRI · FAO)</Badge>
-            <Button variant="outline" size="sm" onClick={runDemoPlan} disabled={loading} title={language === 'bn' ? 'AI মডেল ছাড়াই একটি নমুনা পরিকল্পনা চালান' : 'Run a sample plan without the LLM'}>
+            {/* <Badge variant="outline" className="bg-amber-50 border-amber-300 text-amber-800">{language === 'bn' ? 'টিয়ার ০ — মূল সংস্করণ' : 'Tier 0 — Core Build'}</Badge> */}
+            {/* <Badge variant="outline" className="bg-violet-50 border-violet-300 text-violet-800">{language === 'bn' ? '🔬 GPT রোগ বিশ্লেষণ' : '🔬 GPT Disease Analysis'}</Badge> */}
+            {/* <Badge variant="outline" className="bg-emerald-50 border-emerald-300 text-emerald-800">{language === 'bn' ? '১০০০+ যাচাইকৃত তথ্য' : '1000+ verified facts'} (BARI · BWMRI · BRRI · FAO)</Badge> */}
+            {/* <Button variant="outline" size="sm" onClick={runDemoPlan} disabled={loading} title={language === 'bn' ? 'AI মডেল ছাড়াই একটি নমুনা পরিকল্পনা চালান' : 'Run a sample plan without the LLM'}>
               <Sparkles className="w-3.5 h-3.5 mr-1.5" />
               {language === 'bn' ? 'ডেমো পরিকল্পনা' : 'Demo Plan'}
-            </Button>
+            </Button> */}
             <Button variant="outline" size="sm" onClick={startNewSession}>
               <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
               {language === 'bn' ? 'নতুন কৃষক' : 'New Farmer'}
@@ -403,29 +433,29 @@ export default function Home() {
       </header>
 
       {/* Main layout */}
-      <div className="flex-1 max-w-[1800px] mx-auto w-full px-4 py-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <div className="flex-1 max-w-[1800px] mx-auto w-full px-4 py-3 lg:py-4 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:h-[calc(100svh-7.5rem)] lg:min-h-0">
         {/* Left: Chat */}
-        <div className="lg:col-span-7 flex flex-col">
-          <Card className="flex-1 flex flex-col min-h-[700px]">
-            <CardHeader className="pb-3">
+        <div className="lg:col-span-7 flex min-h-0 flex-col">
+          <Card className="flex min-h-[calc(100svh-9rem)] flex-1 flex-col lg:min-h-0">
+            <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2 text-stone-800">
                 <User className="w-4 h-4 text-green-700" />
                 {language === 'bn' ? 'কৃষকের কথোপকথন' : 'Farmer Conversation'}
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex-1 flex flex-col gap-3 overflow-hidden">
+            <CardContent className="min-h-0 flex-1 flex flex-col gap-3 overflow-hidden">
               <ScrollArea className="flex-1 pr-2" ref={scrollRef as any}>
                 <div className="space-y-4 pb-4">
                   {messages.length === 0 && !loading && (
-                    <div className="text-center py-12 text-stone-500">
-                      <Sprout className="w-12 h-12 mx-auto mb-3 text-green-300" />
+                    <div className="text-center py-6 sm:py-8 text-stone-500">
+                      <Sprout className="w-10 h-10 mx-auto mb-3 text-green-300" />
                       <p className="font-medium text-stone-700">{language === 'bn' ? 'AgriSense AI-তে স্বাগতম' : 'Welcome to AgriSense AI'}</p>
                       <p className="text-sm mt-1 max-w-md mx-auto">{language === 'bn' ? 'আপনার জমির অবস্থান, আকার, মাটি, পানির উৎস, বাজেট ও মৌসুম বলুন—আমি আবহাওয়াভিত্তিক খরচসহ পরিকল্পনা তৈরি করব।' : 'Tell me about your farm — location, size, soil, water, budget, season — and I’ll build you a costed, weather-aware plan.'}</p>
-                      <div className="mt-4 text-xs text-stone-400 max-w-md mx-auto">
+                      <div className="mt-3 text-xs text-stone-400 max-w-md mx-auto">
                         <p className="mb-1">{language === 'bn' ? 'উদাহরণ:' : 'Try:'}</p>
                         <em>{language === 'bn' ? '“যশোরে আমার ৫০ শতক দোআঁশ জমি আছে, নলকূপের পানি ও ২০,০০০ টাকা বাজেটে রবি মৌসুমে চাষ করতে চাই।”' : '“I have 50 decimal in Jashore, loamy soil, tubewell water, and want to grow something this Rabi season with a 20000 taka budget.”'}</em>
                       </div>
-                      <div className="mt-4 text-xs">
+                      <div className="mt-3 text-xs">
                         <Button variant="outline" size="sm" onClick={runDemoPlan}>
                           <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                           {language === 'bn' ? 'ডেমো পরিকল্পনা চালান (AI মডেল লাগবে না)' : 'Run a demo plan (no LLM needed)'}
@@ -442,7 +472,7 @@ export default function Home() {
                       }`}>
                         {m.role === 'assistant' ? (
                           <div className="prose prose-sm max-w-none prose-headings:text-stone-800 prose-strong:text-stone-800 prose-code:text-green-700 prose-code:bg-green-50 prose-code:px-1 prose-code:rounded">
-                            <ReactMarkdown>{m.content}</ReactMarkdown>
+                            <ReactMarkdown components={MARKDOWN_COMPONENTS}>{m.content}</ReactMarkdown>
                           </div>
                         ) : (
                           <p className="whitespace-pre-wrap">{m.content}</p>
@@ -484,7 +514,7 @@ export default function Home() {
         </div>
 
         {/* Right: Profile + Tabbed visualization panel */}
-        <div className="lg:col-span-5 flex flex-col gap-4">
+        <div className="lg:col-span-5 flex min-h-0 flex-col gap-4">
           {/* Farmer profile card */}
           <Card>
             <CardHeader className="pb-3">
@@ -533,7 +563,7 @@ export default function Home() {
           </Card>
 
           {/* Tabbed visualization panel */}
-          <Card className="flex-1 flex flex-col min-h-[500px]">
+          <Card className="flex-1 flex flex-col min-h-[500px] lg:min-h-0">
             <CardHeader className="pb-2">
               <Tabs value={activeRightTab} onValueChange={setActiveRightTab}>
                 <TabsList className="grid h-auto w-full grid-cols-2 gap-1 p-1 sm:grid-cols-3">
@@ -572,11 +602,11 @@ export default function Home() {
                 </TabsList>
               </Tabs>
             </CardHeader>
-            <CardContent className="flex-1 overflow-hidden">
+            <CardContent className="min-h-0 flex-1 overflow-hidden">
               <Tabs value={activeRightTab} onValueChange={setActiveRightTab} className="h-full">
                 {/* CROPS TAB */}
                 <TabsContent value="crops" className="mt-0 h-full">
-                  <ScrollArea className="h-[600px] pr-2">
+                  <ScrollArea className="h-full pr-2">
                     {!latestCrops ? (
                       <EmptyState
                         icon={<Sprout className="w-8 h-8 text-stone-300" />}
@@ -599,7 +629,7 @@ export default function Home() {
 
                 {/* CALENDAR TAB */}
                 <TabsContent value="calendar" className="mt-0 h-full">
-                  <ScrollArea className="h-[600px] pr-2">
+                  <ScrollArea className="h-full pr-2">
                     {!latestCalendar ? (
                       <EmptyState
                         icon={<CalendarDays className="w-8 h-8 text-stone-300" />}
@@ -614,7 +644,7 @@ export default function Home() {
 
                 {/* FINANCIALS TAB */}
                 <TabsContent value="financials" className="mt-0 h-full">
-                  <ScrollArea className="h-[600px] pr-2">
+                  <ScrollArea className="h-full pr-2">
                     {!latestFinancials ? (
                       <EmptyState
                         icon={<Calculator className="w-8 h-8 text-stone-300" />}
@@ -629,14 +659,14 @@ export default function Home() {
 
                 {/* SCENARIO SIMULATOR TAB */}
                 <TabsContent value="scenario" className="mt-0 h-full">
-                  <ScrollArea className="h-[600px] pr-2">
+                  <ScrollArea className="h-full pr-2">
                     <ScenarioSimulator language={language} recommendedCrops={latestCrops} />
                   </ScrollArea>
                 </TabsContent>
 
                 {/* TIER 2 MARKETPLACE TAB */}
                 <TabsContent value="marketplace" className="mt-0 h-full">
-                  <ScrollArea className="h-[600px] pr-2">
+                  <ScrollArea className="h-full pr-2">
                     {!latestSuppliers ? (
                       <EmptyState
                         icon={<ShoppingCart className="w-8 h-8 text-stone-300" />}
@@ -649,7 +679,7 @@ export default function Home() {
 
                 {/* TIER 2 MARKET INTELLIGENCE TAB */}
                 <TabsContent value="market" className="mt-0 h-full">
-                  <ScrollArea className="h-[600px] pr-2">
+                  <ScrollArea className="h-full pr-2">
                     {!latestMarket ? (
                       <EmptyState
                         icon={<BarChart3 className="w-8 h-8 text-stone-300" />}
@@ -662,14 +692,14 @@ export default function Home() {
 
                 {/* PLANT DISEASE DETECTION TAB */}
                 <TabsContent value="disease" className="mt-0 h-full">
-                  <ScrollArea className="h-[600px] pr-2">
-                    <PlantDiseaseDetector language={language} />
+                  <ScrollArea className="h-full pr-2">
+                    <PlantDiseaseDetector language={language} sessionId={sessionId} cropHint={profile?.chosenCrop} />
                   </ScrollArea>
                 </TabsContent>
 
                 {/* TRACE TAB */}
                 <TabsContent value="trace" className="mt-0 h-full">
-                  <ScrollArea className="h-[600px] pr-2">
+                  <ScrollArea className="h-full pr-2">
                     {allTraces.length === 0 ? (
                       <EmptyState
                         icon={<Wrench className="w-8 h-8 text-stone-300" />}
@@ -694,7 +724,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t bg-white/60 py-3">
         <div className="max-w-[1800px] mx-auto px-4 text-center text-xs text-stone-500">
-          {language === 'bn' ? 'Open-Meteo-এর বাস্তব আবহাওয়া · সরকারি DAM বাজার তথ্য · মক সরবরাহকারী বাজার · BARI · BWMRI · BRRI · FAO-এর ১০০০+ যাচাইকৃত তথ্য' : 'Real weather via Open-Meteo · Official DAM market data · Mock supplier marketplace · 1000+ verified facts from BARI · BWMRI · BRRI · FAO · Built for Bdapps Agentic AI Hackathon'}
+          {language === 'bn' ? 'Cultivate and Grow A better Bangladesh' : 'Cultivate and Grow A better Bangladesh'}
         </div>
       </footer>
     </div>
