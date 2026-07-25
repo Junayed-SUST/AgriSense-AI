@@ -3,6 +3,44 @@
 
 import { CROPS, INPUT_COSTS } from '@/lib/kb/crops';
 
+interface CropFinancialAssumption {
+  yieldFactor: number;
+  priceFactor: number;
+  harvestMarketingCostBdt: number;
+}
+
+const DEFAULT_FINANCIAL_ASSUMPTION: CropFinancialAssumption = {
+  yieldFactor: 0.9,
+  priceFactor: 0.85,
+  harvestMarketingCostBdt: 3500,
+};
+
+const CROP_FINANCIAL_ASSUMPTIONS: Record<string, CropFinancialAssumption> = {
+  'rice-boro': { yieldFactor: 0.92, priceFactor: 0.9, harvestMarketingCostBdt: 4500 },
+  'rice-aman': { yieldFactor: 0.92, priceFactor: 0.9, harvestMarketingCostBdt: 4200 },
+  'rice-aus': { yieldFactor: 0.88, priceFactor: 0.88, harvestMarketingCostBdt: 3500 },
+  'wheat': { yieldFactor: 0.88, priceFactor: 0.86, harvestMarketingCostBdt: 3500 },
+  'maize': { yieldFactor: 0.9, priceFactor: 0.85, harvestMarketingCostBdt: 4500 },
+  'jute': { yieldFactor: 0.88, priceFactor: 0.85, harvestMarketingCostBdt: 9000 },
+  'potato': { yieldFactor: 0.82, priceFactor: 0.72, harvestMarketingCostBdt: 16000 },
+  'tomato': { yieldFactor: 0.72, priceFactor: 0.62, harvestMarketingCostBdt: 22000 },
+  'brinjal': { yieldFactor: 0.75, priceFactor: 0.65, harvestMarketingCostBdt: 20000 },
+  'chili': { yieldFactor: 0.78, priceFactor: 0.68, harvestMarketingCostBdt: 14000 },
+  'okra': { yieldFactor: 0.76, priceFactor: 0.68, harvestMarketingCostBdt: 15000 },
+  'cucumber': { yieldFactor: 0.76, priceFactor: 0.65, harvestMarketingCostBdt: 16000 },
+  'onion': { yieldFactor: 0.82, priceFactor: 0.7, harvestMarketingCostBdt: 14000 },
+};
+
+function getFinancialAssumption(cropId: string): CropFinancialAssumption {
+  return CROP_FINANCIAL_ASSUMPTIONS[cropId] || DEFAULT_FINANCIAL_ASSUMPTION;
+}
+
+function getContingencyRate(riskLevel: string): number {
+  if (riskLevel === 'high') return 0.12;
+  if (riskLevel === 'medium') return 0.1;
+  return 0.08;
+}
+
 export interface FinancialLineItem {
   category: string;
   item: string;
@@ -58,6 +96,7 @@ export function computeFinancials(cropId: string, farmSizeDecimal: number, sowin
   const farmSizeAcre = farmSizeDecimal / 100;
   const c = INPUT_COSTS;
   const f = crop.fertilizerKgPerAcre;
+  const financialAssumption = getFinancialAssumption(crop.id);
   const lineItems: FinancialLineItem[] = [];
 
   // Fertilizer line items
@@ -74,11 +113,16 @@ export function computeFinancials(cropId: string, farmSizeDecimal: number, sowin
     'rice-boro': 25, 'rice-aman': 22, 'rice-aus': 30,
     'wheat': 50, 'maize': 25, 'potato': 700, 'mustard': 6,
     'lentil': 25, 'jute': 7, 'tomato': 0.3, 'brinjal': 0.3, 'chili': 0.5,
+    'mungbean': 10, 'sesame': 3, 'okra': 4, 'cucumber': 0.5,
+    'onion': 4, 'groundnut': 45,
   };
   const seedUnit: Record<string, number> = {
     'rice-boro': c.seedRicePerKg, 'rice-aman': c.seedRicePerKg, 'rice-aus': c.seedRicePerKg,
     'wheat': c.seedWheatPerKg, 'maize': c.seedMaizePerKg, 'potato': c.seedPotatoPerKg,
     'mustard': c.seedMustardPerKg, 'lentil': c.seedLentilPerKg, 'jute': c.seedJutePerKg,
+    'mungbean': c.seedMungbeanPerKg, 'sesame': c.seedSesamePerKg,
+    'okra': c.seedOkraPerKg, 'cucumber': c.seedCucumberPerKg,
+    'onion': c.seedOnionPerKg, 'groundnut': c.seedGroundnutPerKg,
     'tomato': c.seedTomatoPer10g * 100, 'brinjal': c.seedBrinjalPer10g * 100,
     'chili': c.seedChiliPer10g * 100,
   };
@@ -96,6 +140,8 @@ export function computeFinancials(cropId: string, farmSizeDecimal: number, sowin
     'rice-boro': 35, 'rice-aman': 30, 'rice-aus': 18,
     'wheat': 18, 'maize': 22, 'potato': 50, 'mustard': 14,
     'lentil': 12, 'jute': 45, 'tomato': 70, 'brinjal': 75, 'chili': 80,
+    'mungbean': 14, 'sesame': 16, 'okra': 55, 'cucumber': 50,
+    'onion': 60, 'groundnut': 28,
   };
   lineItems.push({
     category: 'Labour',
@@ -111,6 +157,8 @@ export function computeFinancials(cropId: string, farmSizeDecimal: number, sowin
     'rice-boro': 18, 'rice-aman': 4, 'rice-aus': 2,
     'wheat': 3, 'maize': 4, 'potato': 5, 'mustard': 2,
     'lentil': 1, 'jute': 2, 'tomato': 12, 'brinjal': 14, 'chili': 10,
+    'mungbean': 1, 'sesame': 1, 'okra': 6, 'cucumber': 7,
+    'onion': 6, 'groundnut': 4,
   };
   lineItems.push({
     category: 'Irrigation',
@@ -136,6 +184,8 @@ export function computeFinancials(cropId: string, farmSizeDecimal: number, sowin
     'rice-boro': 1500, 'rice-aman': 1000, 'rice-aus': 600,
     'wheat': 800, 'maize': 1200, 'potato': 3000, 'mustard': 600,
     'lentil': 800, 'jute': 1000, 'tomato': 4500, 'brinjal': 5000, 'chili': 5500,
+    'mungbean': 900, 'sesame': 800, 'okra': 3000, 'cucumber': 3200,
+    'onion': 3500, 'groundnut': 1200,
   };
   lineItems.push({
     category: 'Pest mgmt',
@@ -146,10 +196,31 @@ export function computeFinancials(cropId: string, farmSizeDecimal: number, sowin
     totalBdt: pestCost[crop.id] || 1000,
   });
 
+  lineItems.push({
+    category: 'Harvest/market',
+    item: 'Harvesting, sorting, transport, commission',
+    quantityPerAcre: 1,
+    unit: 'lump',
+    rateBdt: financialAssumption.harvestMarketingCostBdt,
+    totalBdt: financialAssumption.harvestMarketingCostBdt,
+  });
+
+  const subtotalBeforeContingency = lineItems.reduce((s, li) => s + li.totalBdt, 0);
+  const contingencyRate = getContingencyRate(crop.riskLevel);
+  lineItems.push({
+    category: 'Contingency',
+    item: 'Loss buffer for price, wastage, extra labour',
+    quantityPerAcre: Math.round(contingencyRate * 100),
+    unit: '%',
+    rateBdt: subtotalBeforeContingency,
+    totalBdt: Math.round(subtotalBeforeContingency * contingencyRate),
+  });
+
   const totalCostPerAcre = lineItems.reduce((s, li) => s + li.totalBdt, 0);
-  const yieldPerAcre = (crop.typicalYieldPerAcre.min + crop.typicalYieldPerAcre.max) / 2;
-  const pricePerUnit = (crop.typicalPricePerUnit.min + crop.typicalPricePerUnit.max) / 2;
+  const yieldPerAcre = ((crop.typicalYieldPerAcre.min + crop.typicalYieldPerAcre.max) / 2) * financialAssumption.yieldFactor;
+  const pricePerUnit = ((crop.typicalPricePerUnit.min + crop.typicalPricePerUnit.max) / 2) * financialAssumption.priceFactor;
   const scenarioNotes: string[] = [];
+  scenarioNotes.push(`Conservative Bangladesh farmgate estimate: ${Math.round(financialAssumption.yieldFactor * 100)}% of midpoint yield and ${Math.round(financialAssumption.priceFactor * 100)}% of midpoint price, plus harvest/transport/commission and contingency costs.`);
   if (sowingDate) {
     // crude scenario note based on sowing date
     if (!/^\d{4}-\d{2}-\d{2}$/.test(sowingDate) || Number.isNaN(Date.parse(`${sowingDate}T00:00:00Z`))) {
@@ -243,4 +314,3 @@ export function computeFinancials(cropId: string, farmSizeDecimal: number, sowin
     scenarioNotes,
   };
 }
-
