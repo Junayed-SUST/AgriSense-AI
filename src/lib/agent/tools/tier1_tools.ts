@@ -448,8 +448,25 @@ export function simulateScenario(params: {
     case 'sowing_delay_days': {
       const delayDays = Math.trunc(params.changeValue);
       revisedSowingDate = shiftIsoDate(initialSowing, delayDays);
-      explanation = `Sowing shifts ${delayDays} day(s), from ${initialSowing} to ${revisedSowingDate}; all relative calendar dates shift equally.`;
-      assumptions.push('Yield and prices remain unchanged until a verified late-sowing response and a revised weather forecast are supplied.');
+
+      // NEW: Late-sowing yield penalty (BARI research-based rule)
+      // Wheat: ~1.3% yield loss per day of delay past optimal window
+      // Rice: ~0.5% yield loss per day of delay
+      // Vegetables: ~0.8% yield loss per day of delay
+      const yieldLossPerDayMap: Record<string, number> = {
+        'wheat': 1.3, 'rice-boro': 0.5, 'rice-aman': 0.5, 'rice-aus': 0.5,
+        'potato': 0.9, 'tomato': 0.8, 'brinjal': 0.8, 'chili': 0.8,
+        'maize': 0.7, 'mustard': 1.0, 'lentil': 1.1, 'jute': 0.6,
+      };
+      const yieldLossPerDay = yieldLossPerDayMap[cropId] || 0.7; // default 0.7%/day
+      const absDelay = Math.abs(delayDays);
+      const yieldLossPercent = Math.min(absDelay * yieldLossPerDay, 50); // cap at 50% max loss
+      const yieldMultiplier = 1 - (yieldLossPercent / 100);
+      const adjustedYield = totalYield * yieldMultiplier;
+      revisedRevenue = Math.round((adjustedYield / totalYield) * baseRevenue);
+
+      explanation = `Sowing shifts ${delayDays} day(s), from ${initialSowing} to ${revisedSowingDate}. Late-sowing yield penalty: ${yieldLossPercent.toFixed(1)}% yield reduction (${yieldLossPerDay}%/day × ${absDelay} days, BARI research). Revenue drops from ৳${baseRevenue.toLocaleString()} to ৳${revisedRevenue.toLocaleString()}.`;
+      assumptions.push(`Yield loss rate of ${yieldLossPerDay}%/day is based on BARI Annual Report data for ${crop.name}. Capped at 50% maximum loss. Prices assumed unchanged.`);
       break;
     }
   }

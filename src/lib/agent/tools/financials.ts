@@ -12,6 +12,17 @@ export interface FinancialLineItem {
   totalBdt: number;
 }
 
+export interface RiskAnalysis {
+  riskAdjustedRoi: number;          // ROI after risk penalty
+  riskPenaltyPercent: number;       // penalty applied
+  profitMarginLabel: 'High Margin' | 'Moderate' | 'Thin Margin' | 'Loss-Making';
+  worstCaseProfit: number;          // if price drops 20% AND yield drops 20%
+  bestCaseProfit: number;           // if price rises 20% AND yield rises 20%
+  priceDropBreakpoint: number;      // % price drop that makes profit = 0
+  yieldDropBreakpoint: number;      // % yield drop that makes profit = 0
+  sensitivitySummary: string;       // human-readable verdict
+}
+
 export interface FinancialResult {
   cropId: string;
   cropName: string;
@@ -33,6 +44,7 @@ export interface FinancialResult {
     totalRevenue: number;
     totalProfit: number;
   };
+  riskAnalysis: RiskAnalysis;
   scenarioNotes: string[];
 }
 
@@ -159,6 +171,52 @@ export function computeFinancials(cropId: string, farmSizeDecimal: number, sowin
   const totalCost = Math.round(displayedCostPerAcre * farmSizeAcre);
   const totalRevenue = Math.round(displayedRevenuePerAcre * farmSizeAcre);
   const totalProfit = totalRevenue - totalCost;
+  const baseRoi = displayedCostPerAcre > 0 ? (displayedProfitPerAcre / displayedCostPerAcre) * 100 : 0;
+
+  // ---------- NEW: Risk Analysis ----------
+  const riskPenaltyMap: Record<string, number> = { 'low': 0.05, 'medium': 0.20, 'high': 0.35 };
+  const riskPenalty = riskPenaltyMap[crop.riskLevel] || 0.20;
+  const riskAdjustedRoi = Math.round(baseRoi * (1 - riskPenalty));
+
+  // Profit margin label
+  const profitMarginLabel: RiskAnalysis['profitMarginLabel'] =
+    baseRoi > 60 ? 'High Margin' :
+    baseRoi > 20 ? 'Moderate' :
+    baseRoi > 0 ? 'Thin Margin' :
+    'Loss-Making';
+
+  // Sensitivity: ±20% price and yield swings
+  const worstCaseRevenue = Math.round(displayedYieldPerAcre * 0.8 * displayedPricePerUnit * 0.8);
+  const bestCaseRevenue = Math.round(displayedYieldPerAcre * 1.2 * displayedPricePerUnit * 1.2);
+  const worstCaseProfit = Math.round((worstCaseRevenue - displayedCostPerAcre) * farmSizeAcre);
+  const bestCaseProfit = Math.round((bestCaseRevenue - displayedCostPerAcre) * farmSizeAcre);
+
+  // Price drop breakpoint: at what % price drop does profit = 0?
+  // profit = 0 → price × yield = cost → price = cost/yield
+  // breakpoint % = (1 - cost/(yield × basePrice)) × 100
+  const priceDropBreakpoint = displayedRevenuePerAcre > 0
+    ? Math.round((1 - displayedCostPerAcre / displayedRevenuePerAcre) * 100)
+    : 0;
+
+  // Yield drop breakpoint: at what % yield drop does profit = 0?
+  const yieldDropBreakpoint = displayedRevenuePerAcre > 0
+    ? Math.round((1 - displayedCostPerAcre / displayedRevenuePerAcre) * 100)
+    : 0;
+
+  const sensitivitySummary = worstCaseProfit >= 0
+    ? `Resilient: Even with 20% price AND yield drops, total profit stays positive at ৳${worstCaseProfit.toLocaleString()}. ${profitMarginLabel} operation.`
+    : `Vulnerable: A simultaneous 20% price and yield drop would result in a ৳${Math.abs(worstCaseProfit).toLocaleString()} loss. The crop can absorb up to a ${Math.max(0, priceDropBreakpoint)}% price drop before breaking even. ${profitMarginLabel} operation.`;
+
+  const riskAnalysis: RiskAnalysis = {
+    riskAdjustedRoi,
+    riskPenaltyPercent: Math.round(riskPenalty * 100),
+    profitMarginLabel,
+    worstCaseProfit,
+    bestCaseProfit,
+    priceDropBreakpoint: Math.max(0, priceDropBreakpoint),
+    yieldDropBreakpoint: Math.max(0, yieldDropBreakpoint),
+    sensitivitySummary,
+  };
 
   return {
     cropId,
@@ -172,7 +230,7 @@ export function computeFinancials(cropId: string, farmSizeDecimal: number, sowin
       pricePerUnit: displayedPricePerUnit,
       revenuePerAcre: displayedRevenuePerAcre,
       profitPerAcre: displayedProfitPerAcre,
-      roiPercent: Math.round((displayedProfitPerAcre / displayedCostPerAcre) * 100),
+      roiPercent: Math.round(baseRoi),
       breakEvenPricePerUnit: Math.round(displayedCostPerAcre / displayedYieldPerAcre),
       breakEvenYieldMaund: Math.round((displayedCostPerAcre / displayedPricePerUnit) * 10) / 10,
     },
@@ -181,6 +239,8 @@ export function computeFinancials(cropId: string, farmSizeDecimal: number, sowin
       totalRevenue,
       totalProfit,
     },
+    riskAnalysis,
     scenarioNotes,
   };
 }
+

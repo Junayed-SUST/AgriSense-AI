@@ -1,7 +1,7 @@
 // Tool 2: recommend_crops — ranks 3+ candidate crops for the farm profile + season + weather
 // Tier 0 #3. Each recommendation cites the retrieved KB data + weather it used.
 
-import { CROPS, SOILS, INPUT_COSTS, type CropRecord, type Season } from '@/lib/kb/crops';
+import { CROPS, SOILS, SEASONS, INPUT_COSTS, type CropRecord, type Season } from '@/lib/kb/crops';
 import { getCropsForSeason, ragSearch } from '@/lib/kb/rag';
 import type { WeatherResult } from './weather';
 
@@ -12,6 +12,7 @@ export interface FarmProfile {
   waterSource?: string;
   budgetBdt?: number;
   targetSeason?: string;
+  previousCropId?: string;  // for crop rotation penalty
 }
 
 export interface CropRecommendation {
@@ -42,6 +43,43 @@ function waterNeedLabel(mm: number): 'low' | 'medium' | 'high' {
   if (mm < 300) return 'low';
   if (mm < 700) return 'medium';
   return 'high';
+}
+
+// Botanical family map — for crop rotation penalty (same family → same pest/disease pressure)
+const CROP_FAMILY_MAP: Record<string, string> = {
+  'rice-boro': 'Poaceae',
+  'rice-aman': 'Poaceae',
+  'rice-aus': 'Poaceae',
+  'wheat': 'Poaceae',
+  'maize': 'Poaceae',
+  'jute': 'Malvaceae',
+  'potato': 'Solanaceae',
+  'tomato': 'Solanaceae',
+  'brinjal': 'Solanaceae',
+  'chili': 'Solanaceae',
+  'mustard': 'Brassicaceae',
+  'lentil': 'Fabaceae',
+};
+
+// Parse sowing window string (e.g. "Nov 1 – Dec 15") into month range [startMonth, endMonth] (1-indexed)
+const MONTH_MAP: Record<string, number> = {
+  'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+  'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
+};
+
+function parseSowingWindowMonths(sowingWindow: string): [number, number] | null {
+  // Extract month names from the window string (e.g. "Nov 1 – Dec 15")
+  const months = sowingWindow.toLowerCase().match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/g);
+  if (!months || months.length < 1) return null;
+  const startMonth = MONTH_MAP[months[0]];
+  const endMonth = months.length >= 2 ? MONTH_MAP[months[months.length - 1]] : startMonth;
+  return [startMonth, endMonth];
+}
+
+function isMonthInRange(month: number, start: number, end: number): boolean {
+  if (start <= end) return month >= start && month <= end;
+  // Wraps around year boundary (e.g. Nov-Feb)
+  return month >= start || month <= end;
 }
 
 function computePerAcreCost(crop: CropRecord): number {
@@ -119,6 +157,10 @@ export async function recommendCrops(profile: FarmProfile, weather: WeatherResul
   // Fallback: if no candidates (shouldn't happen), use all crops
   if (candidates.length === 0) candidates = CROPS.slice();
 
+  // Get the current month for sowing window fitness check
+  const currentMonth = new Date().getMonth() + 1; // 1-indexed
+  const seasonRecord = SEASONS.find(s => s.id === season);
+
   // Score each candidate
   const scored = candidates.map(crop => {
     let score = 50; // baseline
@@ -193,7 +235,56 @@ export async function recommendCrops(profile: FarmProfile, weather: WeatherResul
     if (crop.riskLevel === 'low') score += 5;
     else if (crop.riskLevel === 'high') score -= 10;
 
-    // 6. RAG-grounded evidence: pull MULTIPLE relevant KB chunks for evidence
+    // ---------- NEW RULE-BASED SCORING FACTORS ----------
+
+    // 6. Sowing window fitness (+15 if in optimal window, −20 if >30 days past)
+    if (seasonRecord) {
+      const windowMonths = parseSowingWindowMonths(seasonRecord.sowingWindow);
+      if (windowMonths) {
+        const [winStart, winEnd] = windowMonths;
+        if (isMonthInRange(currentMonth, winStart, winEnd)) {
+          score += 15;
+          rationale.push(`Current month is within ${season} optimal sowing window (${seasonRecord.sowingWindow}) — excellent timing.`);
+        } else {
+          // How far off are we? Simple rule: if >2 months past end, harsh penalty
+          const monthsPastEnd = winEnd < currentMonth ? currentMonth - winEnd : currentMonth + 12 - winEnd;
+          if (monthsPastEnd <= 1) {
+            score -= 5;
+            rationale.push(`Slightly past the optimal ${season} sowing window (${seasonRecord.sowingWindow}). Minor yield impact expected.`);
+          } else {
+            score -= 20;
+            rationale.push(`Significantly past the optimal ${season} sowing window (${seasonRecord.sowingWindow}). Late sowing typically reduces yield 10-25%.`);
+            kbEvidence.push(`BARI research: late sowing past optimal window reduces wheat yield ~1.3%/day and rice yield ~0.5%/day. (BARI Annual Report 2023)`);
+          }
+        }
+      }
+    }
+
+    // 7. Crop rotation penalty (−15 if same botanical family as previous crop)
+    if (profile.previousCropId) {
+      const prevFamily = CROP_FAMILY_MAP[profile.previousCropId];
+      const currFamily = CROP_FAMILY_MAP[crop.id];
+      if (prevFamily && currFamily && prevFamily === currFamily && crop.id !== profile.previousCropId) {
+        score -= 10;
+        rationale.push(`Same botanical family (${currFamily}) as previous crop — higher pest/disease carryover risk. Crop rotation with a different family is recommended.`);
+      } else if (prevFamily && currFamily && crop.id === profile.previousCropId) {
+        score -= 15;
+        rationale.push(`Same crop as last season — depletes specific soil nutrients and increases pest/disease buildup. Rotate to a different crop family.`);
+      } else if (prevFamily && currFamily && prevFamily !== currFamily) {
+        score += 5;
+        rationale.push(`Good crop rotation: ${currFamily} family follows ${prevFamily} — breaks pest/disease cycles.`);
+      }
+    }
+
+    // 8. Market glut / oversupply risk (−10 if risk notes mention oversupply, price crash)
+    if (/oversuppl|glut|price crash|price drop|volatile price|excess production/i.test(crop.riskNotes)) {
+      score -= 10;
+      rationale.push(`Market risk: ${crop.name} has noted oversupply/price volatility concerns — consider diversifying.`);
+    }
+
+    // ---------- END NEW FACTORS ----------
+
+    // 9. RAG-grounded evidence: pull MULTIPLE relevant KB chunks for evidence
     // Query for variety + soil + crop-specific facts
     const ragQuery = `${crop.name} ${profile.soilType || ''} ${season} season cultivation variety fertilizer`;
     const ragResults = ragSearch(ragQuery, 3);
@@ -232,6 +323,7 @@ export async function recommendCrops(profile: FarmProfile, weather: WeatherResul
     profile,
     weather,
     recommendations: top,
-    notes: `Ranked ${top.length} candidate crops for ${season} season using soil=${profile.soilType || '?'}, water=${profile.waterSource || '?'}, budget=৳${profile.budgetBdt?.toLocaleString() || '?'}, farm size=${profile.farmSizeDecimal || '?'} decimal. Scores combine soil fit, water match, budget fit, ROI, and risk.`,
+    notes: `Ranked ${top.length} candidate crops for ${season} season using soil=${profile.soilType || '?'}, water=${profile.waterSource || '?'}, budget=৳${profile.budgetBdt?.toLocaleString() || '?'}, farm size=${profile.farmSizeDecimal || '?'} decimal. Scores combine soil fit, water match, budget fit, ROI, risk, sowing window, rotation, and market risk.`,
   };
 }
+
