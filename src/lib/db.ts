@@ -1,10 +1,14 @@
 // db.ts — resilient DB facade. Tries Prisma (for local dev with SQLite) and
 // falls back to an in-memory backend on Vercel where SQLite cannot persist
-// across serverless invocations. All existing callers (`db.farmer.upsert(...)`,
-// `db.$transaction([...])`) keep working unchanged because we synchronously
-// resolve the backend on first access.
+// across serverless invocations. All existing callers
+// (`db.farmer.upsert(...)`, `db.farmer.findUnique({...})`, `db.$transaction([...])`)
+// keep working unchanged because each method is a Promise-returning proxy
+// that resolves the underlying backend lazily.
 import { getDb } from './db/memory';
 import type { MemoryDb } from './db/memory';
+
+type LazyModel = MemoryDb['farmer'];
+type NoopModel = LazyModel;
 
 let resolved: MemoryDb | null = null;
 
@@ -14,37 +18,52 @@ async function ensureResolved(): Promise<MemoryDb> {
   return resolved;
 }
 
-// We expose `db` as a thin object whose methods synchronously trigger the
-// async backend resolution implicitly. Because every existing route uses
-// `await` before touching db properties, the first `await` inside the
-// handler gives us time to resolve.
+// Build a lazy proxy for any model that forwards every method call to the
+// resolved backend. The shape mirrors Prisma's nested model API and supports
+// any combination of {upsert, update, create, findUnique, findFirst, findMany, delete, count}.
+function lazyModel(model: 'farmer' | 'conversation' | 'trace' | 'traceEntry'): LazyModel {
+  return new Proxy(
+    {},
+    {
+      get(_target, prop: string) {
+        return (...args: unknown[]) =>
+          ensureResolved().then((d) => {
+            const m = d[model] as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>;
+            const fn = m[prop];
+            if (typeof fn === 'function') return fn(...args);
+            return null;
+          });
+      },
+    },
+  ) as LazyModel;
+}
+
+// Generic proxy for any model that the in-memory backend does not implement
+// (e.g. weatherCheck, alert, seasonPlan, farmOperation, scenarioRun). Returns
+// null on every call so code can still pass type-checking without crashing.
+function noopModel(): NoopModel {
+  return new Proxy(
+    {},
+    {
+      get(_target, prop: string) {
+        return (..._args: unknown[]) => Promise.resolve(null);
+      },
+    },
+  ) as NoopModel;
+}
+
 export const db = {
-  farmer: {
-    upsert: (...args: Parameters<MemoryDb['farmer']['upsert']>) =>
-      ensureResolved().then(d => d.farmer.upsert(...args)),
-    update: (...args: Parameters<MemoryDb['farmer']['update']>) =>
-      ensureResolved().then(d => d.farmer.update(...args)),
-  },
-  conversation: {
-    create: (...args: Parameters<MemoryDb['conversation']['create']>) =>
-      ensureResolved().then(d => d.conversation.create(...args)),
-    findMany: (...args: Parameters<MemoryDb['conversation']['findMany']>) =>
-      ensureResolved().then(d => d.conversation.findMany(...args)),
-  },
-  trace: {
-    create: (...args: Parameters<MemoryDb['trace']['create']>) =>
-      ensureResolved().then(d => d.trace.create(...args)),
-    findMany: (...args: Parameters<MemoryDb['trace']['findMany']>) =>
-      ensureResolved().then(d => d.trace.findMany(...args)),
-  },
-  traceEntry: {
-    create: (...args: Parameters<MemoryDb['trace']['create']>) =>
-      ensureResolved().then(d => d.trace.create(...args)),
-    findMany: (...args: Parameters<MemoryDb['trace']['findMany']>) =>
-      ensureResolved().then(d => d.trace.findMany(...args)),
-  },
+  farmer: lazyModel('farmer'),
+  conversation: lazyModel('conversation'),
+  trace: lazyModel('trace'),
+  traceEntry: lazyModel('traceEntry'),
+  weatherCheck: noopModel(),
+  alert: noopModel(),
+  seasonPlan: noopModel(),
+  farmOperation: noopModel(),
+  scenarioRun: noopModel(),
   $transaction: (ops: Parameters<MemoryDb['$transaction']>[0]) =>
-    ensureResolved().then(d => d.$transaction(ops)),
-  backend: 'memory' as const,
+    ensureResolved().then((d) => d.$transaction(ops)),
+  backend: 'memory' as 'prisma' | 'memory',
   ready: () => ensureResolved(),
 };

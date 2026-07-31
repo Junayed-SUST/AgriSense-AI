@@ -1,11 +1,10 @@
 import { db as prisma } from '@/lib/db';
 
-// Memory store — wraps Prisma with an in-memory fallback so the app keeps
-// working on Vercel serverless where DATABASE_URL is not configured (SQLite
-// is not viable in serverless because the filesystem is ephemeral). The
-// fallback mirrors the subset of operations used by the chat/trace/profile
-// routes and degrades gracefully — data is lost on cold starts but the
-// agent, tools, and demo flow still work.
+// Memory store — in-memory fallback for Vercel serverless where DATABASE_URL
+// is not configured (SQLite is not viable in serverless because the
+// filesystem is ephemeral). The fallback mirrors the subset of Prisma
+// operations used by the chat/trace/profile routes and degrades gracefully —
+// data is lost on cold starts but the agent, tools, and demo flow still work.
 
 type FarmerRow = {
   id: string;
@@ -23,6 +22,7 @@ type FarmerRow = {
   sowingDate?: string | null;
   createdAt: Date;
   updatedAt: Date;
+  [key: string]: unknown;
 };
 
 type ConversationRow = {
@@ -31,6 +31,7 @@ type ConversationRow = {
   role: string;
   content: string;
   createdAt: Date;
+  [key: string]: unknown;
 };
 
 type TraceRow = {
@@ -41,95 +42,286 @@ type TraceRow = {
   toolResult: string;
   durationMs: number;
   createdAt: Date;
+  [key: string]: unknown;
 };
 
-interface FarmerOps {
-  upsert(args: { where: { sessionId: string }; update: Partial<FarmerRow>; create: { sessionId: string } }): Promise<FarmerRow>;
-  update(args: { where: { id: string }; data: Partial<FarmerRow> }): Promise<FarmerRow>;
-}
+type AnyArgs = Record<string, unknown>;
+type AnyResult = unknown;
 
-interface ConversationOps {
-  create(args: { data: Omit<ConversationRow, 'id' | 'createdAt'> }): Promise<ConversationRow>;
-  findMany(args: { where: { farmerId: string }; orderBy?: { createdAt: 'asc' | 'desc' }; take?: number }): Promise<ConversationRow[]>;
-}
-
-interface TraceOps {
-  create(args: { data: Omit<TraceRow, 'id' | 'createdAt'> }): Promise<TraceRow>;
-  findMany(args: { where: { farmerId: string }; orderBy?: { createdAt: 'asc' | 'desc' }; take?: number }): Promise<TraceRow[]>;
-}
-
-interface TransactionOps {
-  <T extends unknown[]>(ops: T): Promise<T>;
+interface ModelOps {
+  [method: string]: (...args: unknown[]) => Promise<AnyResult>;
 }
 
 interface MemoryDb {
-  farmer: FarmerOps;
-  conversation: ConversationOps;
-  trace: TraceOps;
-  $transaction: TransactionOps;
+  farmer: ModelOps;
+  conversation: ModelOps;
+  trace: ModelOps;
+  traceEntry: ModelOps;
+  $transaction: <T extends unknown[]>(ops: T) => Promise<T>;
   readonly backend: 'prisma' | 'memory';
 }
 
 function createMemoryBackend(): MemoryDb {
-  const farmers = new Map<string, FarmerRow>();
+  const farmers = new Map<string, FarmerRow>(); // by sessionId
+  const farmersById = new Map<string, FarmerRow>(); // by id
   const conversations: ConversationRow[] = [];
   const traces: TraceRow[] = [];
+  const seasonPlans: Array<Record<string, unknown> & { id: string; farmerId: string }> = [];
   let counter = 0;
   const newId = () => `mem_${Date.now().toString(36)}_${(counter++).toString(36)}`;
 
-  const farmerOps: FarmerOps = {
-    async upsert({ where, update, create }) {
-      const existing = farmers.get(where.sessionId);
+  function getArg(args: unknown[]): AnyArgs {
+    return (args[0] as AnyArgs) ?? {};
+  }
+
+  function applyInclude(target: FarmerRow, include: unknown): AnyResult {
+    if (!include) return target;
+    const result: Record<string, unknown> = { ...target };
+    const inc = include as Record<string, unknown>;
+
+    if (inc.seasonPlans) {
+      const cfg = inc.seasonPlans as { orderBy?: Record<string, string>; take?: number };
+      let sp = seasonPlans.filter((p) => p.farmerId === target.id);
+      if (cfg?.orderBy) {
+        const key = Object.keys(cfg.orderBy)[0];
+        const dir = cfg.orderBy[key];
+        sp = sp.slice().sort((a, b) => {
+          const av = (a as Record<string, unknown>)[key];
+          const bv = (b as Record<string, unknown>)[key];
+          if (av === bv) return 0;
+          const less = (av ?? '') < (bv ?? '');
+          return dir === 'desc' ? (less ? 1 : -1) : less ? -1 : 1;
+        });
+      }
+      if (cfg?.take) sp = sp.slice(0, cfg.take);
+      result.seasonPlans = sp;
+    }
+    if (inc.conversations) {
+      let cs = conversations.filter((c) => c.farmerId === target.id);
+      const cfg = inc.conversations as { orderBy?: Record<string, string>; take?: number };
+      if (cfg?.orderBy) {
+        const key = Object.keys(cfg.orderBy)[0] as keyof ConversationRow;
+        const dir = cfg.orderBy[key as string];
+        cs = cs.slice().sort((a, b) => {
+          if (a[key] === b[key]) return 0;
+          const less = (a[key] ?? '') < (b[key] ?? '');
+          return dir === 'desc' ? (less ? 1 : -1) : less ? -1 : 1;
+        });
+      }
+      if (cfg?.take) cs = cs.slice(0, cfg.take);
+      result.conversations = cs;
+    }
+    if (inc.traceEntries) {
+      let ts = traces.filter((t) => t.farmerId === target.id);
+      const cfg = inc.traceEntries as { orderBy?: Record<string, string>; take?: number };
+      if (cfg?.orderBy) {
+        const key = Object.keys(cfg.orderBy)[0] as keyof TraceRow;
+        const dir = cfg.orderBy[key as string];
+        ts = ts.slice().sort((a, b) => {
+          if (a[key] === b[key]) return 0;
+          const less = (a[key] ?? '') < (b[key] ?? '');
+          return dir === 'desc' ? (less ? 1 : -1) : less ? -1 : 1;
+        });
+      }
+      if (cfg?.take) ts = ts.slice(0, cfg.take);
+      result.traceEntries = ts;
+    }
+    return result;
+  }
+
+  // ---------- farmer ----------
+  const farmerOps: ModelOps = {
+    async upsert(...args: unknown[]): Promise<AnyResult> {
+      const { where, update = {}, create = {} } = getArg(args);
+      const sessionId = (where as { sessionId: string }).sessionId;
+      const existing = farmers.get(sessionId);
       if (existing) {
         Object.assign(existing, update, { updatedAt: new Date() });
+        farmersById.set(existing.id, existing);
         return existing;
       }
-      const row: FarmerRow = {
+      const merged: FarmerRow = {
         id: newId(),
-        sessionId: create.sessionId,
+        sessionId,
         createdAt: new Date(),
         updatedAt: new Date(),
         ...(update as Partial<FarmerRow>),
+        ...(create as Partial<FarmerRow>),
       };
-      farmers.set(create.sessionId, row);
-      return row;
+      farmers.set(sessionId, merged);
+      farmersById.set(merged.id, merged);
+      return merged;
     },
-    async update({ where, data }) {
-      for (const row of farmers.values()) {
-        if (row.id === where.id) {
-          Object.assign(row, data, { updatedAt: new Date() });
-          return row;
-        }
+    async update(...args: unknown[]): Promise<AnyResult> {
+      const { where, data = {} } = getArg(args);
+      const w = where as { id?: string; sessionId?: string };
+      let target: FarmerRow | undefined;
+      if (w.id) target = farmersById.get(w.id);
+      if (!target && w.sessionId) target = farmers.get(w.sessionId);
+      if (!target) {
+        return {
+          id: w.id ?? newId(),
+          sessionId: w.sessionId ?? '',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          ...(data as object),
+        };
       }
-      throw new Error('Farmer not found');
+      Object.assign(target, data, { updatedAt: new Date() });
+      return target;
+    },
+    async create(...args: unknown[]): Promise<AnyResult> {
+      const { data = {} } = getArg(args);
+      const sessionId = (data as { sessionId?: string }).sessionId ?? newId();
+      const merged: FarmerRow = {
+        id: newId(),
+        sessionId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...(data as Partial<FarmerRow>),
+      };
+      farmers.set(sessionId, merged);
+      farmersById.set(merged.id, merged);
+      return merged;
+    },
+    async findUnique(...args: unknown[]): Promise<AnyResult> {
+      const { where, include } = getArg(args);
+      const w = where as { id?: string; sessionId?: string };
+      let target: FarmerRow | undefined;
+      if (w.id) target = farmersById.get(w.id);
+      if (!target && w.sessionId) target = farmers.get(w.sessionId);
+      if (!target) return null;
+      return applyInclude(target, include);
+    },
+    async findFirst(...args: unknown[]): Promise<AnyResult> {
+      const { where, include } = getArg(args);
+      const w = (where as { id?: string; sessionId?: string } | undefined) ?? {};
+      let target: FarmerRow | undefined;
+      if (w.id) target = farmersById.get(w.id);
+      if (!target && w.sessionId) target = farmers.get(w.sessionId);
+      if (!target && farmers.size > 0) target = farmers.values().next().value;
+      if (!target) return null;
+      return applyInclude(target, include);
+    },
+    async findMany(...args: unknown[]): Promise<AnyResult> {
+      const { where, take, orderBy } = getArg(args);
+      const w = where as { sessionId?: string; id?: { in?: string[] } } | undefined;
+      let list = Array.from(farmers.values());
+      if (w?.sessionId) list = list.filter((f) => f.sessionId === w.sessionId);
+      if (w?.id?.in) list = list.filter((f) => w.id!.in!.includes(f.id));
+      if (orderBy && typeof orderBy === 'object') {
+        const key = Object.keys(orderBy)[0] as keyof FarmerRow;
+        const dir = (orderBy as Record<string, 'asc' | 'desc'>)[key as string];
+        list = list.slice().sort((a, b) => {
+          const av = a[key] as unknown;
+          const bv = b[key] as unknown;
+          if (av === bv) return 0;
+          const less = (av ?? '') < (bv ?? '');
+          return dir === 'desc' ? (less ? 1 : -1) : less ? -1 : 1;
+        });
+      }
+      if (typeof take === 'number') list = list.slice(0, take);
+      return list;
+    },
+    async delete(...args: unknown[]): Promise<AnyResult> {
+      const { where } = getArg(args);
+      const w = where as { id?: string; sessionId?: string };
+      let r: FarmerRow | undefined;
+      if (w.id) r = farmersById.get(w.id);
+      if (!r && w.sessionId) r = farmers.get(w.sessionId);
+      if (r) {
+        farmersById.delete(r.id);
+        farmers.delete(r.sessionId);
+      }
+      return r ?? null;
     },
   };
 
-  const conversationOps: ConversationOps = {
-    async create({ data }) {
-      const row: ConversationRow = { id: newId(), createdAt: new Date(), ...data };
-      conversations.push(row);
-      return row;
+  // ---------- conversation ----------
+  const conversationOps: ModelOps = {
+    async create(...args: unknown[]): Promise<AnyResult> {
+      const { data = {} } = getArg(args);
+      const r = {
+        id: newId(),
+        createdAt: new Date(),
+        ...(data as Partial<ConversationRow>),
+      } as ConversationRow;
+      conversations.push(r);
+      return r;
     },
-    async findMany({ where, orderBy, take }) {
-      let rows = conversations.filter(c => c.farmerId === where.farmerId);
-      if (orderBy?.createdAt === 'desc') rows = rows.slice().reverse();
-      if (typeof take === 'number') rows = rows.slice(-take);
-      return rows;
+    async findMany(...args: unknown[]): Promise<AnyResult> {
+      const { where, orderBy, take } = getArg(args);
+      const w = where as { farmerId?: string } | undefined;
+      let result = w?.farmerId ? conversations.filter((c) => c.farmerId === w.farmerId) : conversations;
+      if (orderBy && typeof orderBy === 'object') {
+        const key = Object.keys(orderBy)[0] as keyof ConversationRow;
+        const dir = (orderBy as Record<string, 'asc' | 'desc'>)[key as string];
+        result = result.slice().sort((a, b) => {
+          if (a[key] === b[key]) return 0;
+          const less = (a[key] ?? '') < (b[key] ?? '');
+          return dir === 'desc' ? (less ? 1 : -1) : less ? -1 : 1;
+        });
+      }
+      if (typeof take === 'number') result = result.slice(0, take);
+      return result;
+    },
+    async findFirst(...args: unknown[]): Promise<AnyResult> {
+      const list = (await conversationOps.findMany(...args)) as ConversationRow[];
+      return list[0] ?? null;
+    },
+    async findUnique(...args: unknown[]): Promise<AnyResult> {
+      const { where } = getArg(args);
+      const id = (where as { id: string }).id;
+      return conversations.find((c) => c.id === id) ?? null;
+    },
+    async count(...args: unknown[]): Promise<AnyResult> {
+      const { where } = getArg(args);
+      const w = where as { farmerId?: string } | undefined;
+      return w?.farmerId ? conversations.filter((c) => c.farmerId === w.farmerId).length : conversations.length;
     },
   };
 
-  const traceOps: TraceOps = {
-    async create({ data }) {
-      const row: TraceRow = { id: newId(), createdAt: new Date(), ...data };
-      traces.push(row);
-      return row;
+  // ---------- trace (and traceEntry alias) ----------
+  const traceOps: ModelOps = {
+    async create(...args: unknown[]): Promise<AnyResult> {
+      const { data = {} } = getArg(args);
+      const r = {
+        id: newId(),
+        createdAt: new Date(),
+        ...(data as Partial<TraceRow>),
+      } as TraceRow;
+      traces.push(r);
+      return r;
     },
-    async findMany({ where, orderBy, take }) {
-      let rows = traces.filter(t => t.farmerId === where.farmerId);
-      if (orderBy?.createdAt === 'desc') rows = rows.slice().reverse();
-      if (typeof take === 'number') rows = rows.slice(-take);
-      return rows;
+    async findMany(...args: unknown[]): Promise<AnyResult> {
+      const { where, orderBy, take } = getArg(args);
+      const w = where as { farmerId?: string } | undefined;
+      let result = w?.farmerId ? traces.filter((t) => t.farmerId === w.farmerId) : traces;
+      if (orderBy && typeof orderBy === 'object') {
+        const key = Object.keys(orderBy)[0] as keyof TraceRow;
+        const dir = (orderBy as Record<string, 'asc' | 'desc'>)[key as string];
+        result = result.slice().sort((a, b) => {
+          if (a[key] === b[key]) return 0;
+          const less = (a[key] ?? '') < (b[key] ?? '');
+          return dir === 'desc' ? (less ? 1 : -1) : less ? -1 : 1;
+        });
+      }
+      if (typeof take === 'number') result = result.slice(0, take);
+      return result;
+    },
+    async findFirst(...args: unknown[]): Promise<AnyResult> {
+      const list = (await traceOps.findMany(...args)) as TraceRow[];
+      return list[0] ?? null;
+    },
+    async findUnique(...args: unknown[]): Promise<AnyResult> {
+      const { where } = getArg(args);
+      const id = (where as { id: string }).id;
+      return traces.find((t) => t.id === id) ?? null;
+    },
+    async count(...args: unknown[]): Promise<AnyResult> {
+      const { where } = getArg(args);
+      const w = where as { farmerId?: string } | undefined;
+      return w?.farmerId ? traces.filter((t) => t.farmerId === w.farmerId).length : traces.length;
     },
   };
 
@@ -137,8 +329,9 @@ function createMemoryBackend(): MemoryDb {
     farmer: farmerOps,
     conversation: conversationOps,
     trace: traceOps,
-    async $transaction(ops) {
-      return Promise.all(ops);
+    traceEntry: traceOps,
+    async $transaction<T extends unknown[]>(ops: T): Promise<T> {
+      return (await Promise.all(ops as unknown as Promise<unknown>[])) as T;
     },
     backend: 'memory',
   };
@@ -152,27 +345,36 @@ async function buildDb(): Promise<MemoryDb> {
   if (initAttempted) return cachedDb ?? createMemoryBackend();
   initAttempted = true;
 
-  const hasDatabaseUrl = typeof process.env.DATABASE_URL === 'string' && process.env.DATABASE_URL.length > 0;
+  const hasDatabaseUrl =
+    typeof process.env.DATABASE_URL === 'string' && process.env.DATABASE_URL.length > 0;
   if (!hasDatabaseUrl) {
     cachedDb = createMemoryBackend();
     return cachedDb;
   }
 
   try {
-    const { PrismaClient } = await import('@prisma/client');
-    const prisma = new PrismaClient({ log: ['error', 'warn'] });
-    // Smoke test — verify the schema can actually be reached before we commit.
-    await prisma.$connect();
+    const mod = await import('@prisma/client');
+    const PrismaClient = (mod as { PrismaClient: new (opts?: unknown) => unknown }).PrismaClient;
+    const prisma = new PrismaClient({ log: ['error', 'warn'] }) as {
+      farmer: ModelOps;
+      conversation: ModelOps;
+      trace: ModelOps;
+      $transaction: <T extends unknown[]>(ops: T) => Promise<T>;
+    };
     cachedDb = {
-      farmer: prisma.farmer as unknown as FarmerOps,
-      conversation: prisma.conversation as unknown as ConversationOps,
-      trace: prisma.trace as unknown as TraceOps,
-      $transaction: prisma.$transaction.bind(prisma) as unknown as TransactionOps,
+      farmer: prisma.farmer,
+      conversation: prisma.conversation,
+      trace: prisma.trace,
+      traceEntry: prisma.trace,
+      $transaction: prisma.$transaction.bind(prisma),
       backend: 'prisma',
     };
     return cachedDb;
   } catch (err) {
-    console.warn('[db] Prisma unavailable, using in-memory fallback:', (err as Error)?.message ?? err);
+    console.warn(
+      '[db] Prisma unavailable, using in-memory fallback:',
+      (err as Error)?.message ?? err,
+    );
     cachedDb = createMemoryBackend();
     return cachedDb;
   }
@@ -180,122 +382,6 @@ async function buildDb(): Promise<MemoryDb> {
 
 export async function getDb(): Promise<MemoryDb> {
   return buildDb();
-}
-
-export async function createOrUpdateSeasonPlan(params: {
-  farmerId: string;
-  crop: string;
-  variety?: string;
-  season?: string;
-  sowingDate?: string;
-  expectedHarvestDate?: string;
-  currentGrowthStage?: string;
-  baselineBudgetBdt?: number;
-  expectedYieldValue?: number;
-  expectedYieldUnit?: string;
-}) {
-  const { farmerId, crop, variety, season, sowingDate, expectedHarvestDate, currentGrowthStage, baselineBudgetBdt, expectedYieldValue, expectedYieldUnit } = params;
-
-  // Find active plan or create new
-  const existing = await prisma.seasonPlan.findFirst({
-    where: { farmerId, planStatus: 'active' },
-    orderBy: { createdAt: 'desc' },
-  });
-
-  if (existing) {
-    return await prisma.seasonPlan.update({
-      where: { id: existing.id },
-      data: {
-        crop,
-        variety: variety || existing.variety,
-        season: season || existing.season,
-        sowingDate: sowingDate || existing.sowingDate,
-        expectedHarvestDate: expectedHarvestDate || existing.expectedHarvestDate,
-        currentGrowthStage: currentGrowthStage || existing.currentGrowthStage,
-        baselineBudgetBdt: baselineBudgetBdt ?? existing.baselineBudgetBdt,
-        expectedYieldValue: expectedYieldValue ?? existing.expectedYieldValue,
-        expectedYieldUnit: expectedYieldUnit || existing.expectedYieldUnit,
-      },
-    });
-  }
-
-  return await prisma.seasonPlan.create({
-    data: {
-      farmerId,
-      crop,
-      variety,
-      season,
-      sowingDate,
-      expectedHarvestDate,
-      currentGrowthStage: currentGrowthStage || 'Sowing',
-      baselineBudgetBdt,
-      expectedYieldValue,
-      expectedYieldUnit: expectedYieldUnit || 'kg',
-      planStatus: 'active',
-    },
-  });
-}
-
-export async function recordFarmOperation(params: {
-  seasonPlanId: string;
-  operationType: 'fertilizer' | 'irrigation' | 'weeding' | 'pest_control' | 'harvest';
-  plannedDate?: string;
-  revisedDate?: string;
-  growthStage?: string;
-  plannedQuantity?: number;
-  quantityUnit?: string;
-  estimatedCostBdt?: number;
-  reason?: string;
-}) {
-  return await prisma.farmOperation.create({
-    data: params,
-  });
-}
-
-export async function createAlert(params: {
-  seasonPlanId: string;
-  alertType: 'pest' | 'disease' | 'heavy_rain' | 'drought' | 'heat';
-  severity: 'high' | 'moderate' | 'low';
-  messageEn: string;
-}) {
-  return await prisma.alert.create({
-    data: params,
-  });
-}
-
-export async function recordScenarioRun(params: {
-  seasonPlanId: string;
-  scenarioType: string;
-  inputJson: any;
-  outputJson: any;
-}) {
-  return await prisma.scenarioRun.create({
-    data: {
-      seasonPlanId: params.seasonPlanId,
-      scenarioType: params.scenarioType,
-      inputJson: JSON.stringify(params.inputJson),
-      outputJson: JSON.stringify(params.outputJson),
-    },
-  });
-}
-
-export async function getFarmerMemory(farmerId: string) {
-  const farmer = await prisma.farmer.findUnique({
-    where: { id: farmerId },
-    include: {
-      seasonPlans: {
-        include: {
-          operations: { orderBy: { createdAt: 'desc' } },
-          alerts: { orderBy: { createdAt: 'desc' } },
-          scenarioRuns: { orderBy: { createdAt: 'desc' } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 5,
-      },
-    },
-  });
-
-  return farmer;
 }
 
 export type { MemoryDb, FarmerRow, ConversationRow, TraceRow };

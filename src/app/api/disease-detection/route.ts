@@ -240,7 +240,7 @@ Return at most 3 disease candidates. If the image is unclear or multiple causes 
           durationMs: Date.now() - startedAt,
         },
       }),
-    ]);
+    ] as Parameters<typeof db.$transaction>[0]);
 
     return NextResponse.json({
       answer,

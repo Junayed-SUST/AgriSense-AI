@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
           durationMs: entry.durationMs,
         },
       })),
-    ]);
+    ] as Parameters<typeof db.$transaction>[0]);
 
     const startOfToday = new Date(now);
     startOfToday.setUTCHours(0, 0, 0, 0);
