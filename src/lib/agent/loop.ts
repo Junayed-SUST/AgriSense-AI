@@ -299,7 +299,7 @@ export async function runAgent(
   responseLanguage: 'en' | 'bn' = 'en',
 ): Promise<AgentRunResult> {
   // 1. Load farmer profile + recent conversation history
-  let farmer = (await db.farmer.findUnique({ where: { sessionId } })) as null | {
+  type FarmerRow = {
     id: string;
     name: string | null;
     location: string | null;
@@ -313,41 +313,42 @@ export async function runAgent(
     chosenCrop: string | null;
     sowingDate: string | null;
   };
+  let farmer: FarmerRow | null = (await db.farmer.findUnique({ where: { sessionId } })) as FarmerRow | null;
   if (!farmer) {
-    farmer = (await db.farmer.create({ data: { sessionId } })) as typeof farmer;
+    farmer = (await db.farmer.create({ data: { sessionId } })) as FarmerRow;
   }
-  // Both branches above resolve to a non-null farmer row.
-  const farmerRow = farmer!;
+  // After the upsert branch above, farmer is guaranteed non-null.
+  const farmerRow: FarmerRow = farmer;
 
   const profile = {
-    name: farmer.name,
-    location: farmer.location,
-    latitude: farmer.latitude,
-    longitude: farmer.longitude,
-    farmSizeDecimal: farmer.farmSizeDecimal,
-    soilType: farmer.soilType,
-    waterSource: farmer.waterSource,
-    budgetBdt: farmer.budgetBdt,
-    targetSeason: farmer.targetSeason,
-    chosenCrop: farmer.chosenCrop,
-    sowingDate: farmer.sowingDate,
+    name: farmerRow.name,
+    location: farmerRow.location,
+    latitude: farmerRow.latitude,
+    longitude: farmerRow.longitude,
+    farmSizeDecimal: farmerRow.farmSizeDecimal,
+    soilType: farmerRow.soilType,
+    waterSource: farmerRow.waterSource,
+    budgetBdt: farmerRow.budgetBdt,
+    targetSeason: farmerRow.targetSeason,
+    chosenCrop: farmerRow.chosenCrop,
+    sowingDate: farmerRow.sowingDate,
   };
   let seasonMemory = await db.seasonPlan.findFirst({
-    where: { farmerId: farmer.id, planStatus: 'active' },
+    where: { farmerId: farmerRow.id, planStatus: 'active' },
     orderBy: { createdAt: 'desc' },
     include: { scenarioRuns: { orderBy: { createdAt: 'desc' }, take: 3 } },
   });
 
   // Save user message
   await db.conversation.create({
-    data: { farmerId: farmer.id, role: 'user', content: userMessage },
+    data: { farmerId: farmerRow.id, role: 'user', content: userMessage },
   });
 
   // Load last 20 conversation messages. The current user message was just
   // persisted, so it is already part of this history and must not be appended
   // a second time.
   const recentConvos = await db.conversation.findMany({
-    where: { farmerId: farmer.id },
+    where: { farmerId: farmerRow.id },
     orderBy: { createdAt: 'desc' },
     take: 20,
   });
@@ -444,7 +445,7 @@ export async function runAgent(
       // Save to DB
       await db.traceEntry.create({
         data: {
-          farmerId: farmer.id,
+          farmerId: farmerRow.id,
           toolName,
           toolArgs: JSON.stringify(parsedArgs),
           toolResult: JSON.stringify(result).slice(0, 50000),
@@ -469,7 +470,7 @@ export async function runAgent(
           }
         }
         if (Object.keys(updates).length > 0) {
-          await db.farmer.update({ where: { id: farmer.id }, data: updates });
+          await db.farmer.update({ where: { id: farmerRow.id }, data: updates });
           Object.assign(profile, updates);
         }
       }
@@ -479,14 +480,14 @@ export async function runAgent(
       // rather than relying only on old chat text.
       if (toolName === 'get_crop_calendar' && !result.error) {
         seasonMemory = await createOrUpdateSeasonPlan({
-          farmerId: farmer.id,
+          farmerId: farmerRow.id,
           crop: result.cropName,
           season: profile.targetSeason || undefined,
           sowingDate: result.sowingDate,
           expectedHarvestDate: result.harvestDate,
         }) as any;
         await db.farmer.update({
-          where: { id: farmer.id },
+          where: { id: farmerRow.id },
           data: { chosenCrop: result.cropName, sowingDate: result.sowingDate },
         });
         profile.chosenCrop = result.cropName;
@@ -495,7 +496,7 @@ export async function runAgent(
 
       if (toolName === 'compute_financials' && !result.error) {
         seasonMemory = await createOrUpdateSeasonPlan({
-          farmerId: farmer.id,
+          farmerId: farmerRow.id,
           crop: result.cropName,
           season: profile.targetSeason || undefined,
           sowingDate: parsedArgs.sowingDate || profile.sowingDate || undefined,
@@ -507,7 +508,7 @@ export async function runAgent(
 
       if (toolName === 'simulate_scenario' && !result.error) {
         const activePlan = seasonMemory || await db.seasonPlan.findFirst({
-          where: { farmerId: farmer.id, planStatus: 'active' },
+          where: { farmerId: farmerRow.id, planStatus: 'active' },
           orderBy: { createdAt: 'desc' },
         });
         if (activePlan) {
@@ -541,7 +542,7 @@ export async function runAgent(
 
   // Save final answer
   await db.conversation.create({
-    data: { farmerId: farmer.id, role: 'assistant', content: finalAnswer },
+    data: { farmerId: farmerRow.id, role: 'assistant', content: finalAnswer },
   });
 
   return { finalAnswer, trace, messages, iterations: iteration };
