@@ -286,3 +286,5 @@ The five behaviors judges will look for, and where each is implemented:
 Built during the 24-hour hackathon window. Uses open-source libraries (Next.js, Prisma, React, shadcn/ui, Tailwind, OpenAI Node SDK). Calls OpenAI's GPT-5.1 API (requires your own key).
 
 Knowledge base data is curated from publicly available Bangladesh government publications (BARC, DAE, BARI, BBS) under fair use for educational purposes.
+#   A g r i S e n s e - A I  
+ 
