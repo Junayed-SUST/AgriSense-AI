@@ -299,9 +299,22 @@ export async function runAgent(
   responseLanguage: 'en' | 'bn' = 'en',
 ): Promise<AgentRunResult> {
   // 1. Load farmer profile + recent conversation history
-  let farmer = await db.farmer.findUnique({ where: { sessionId } });
+  let farmer = (await db.farmer.findUnique({ where: { sessionId } })) as null | {
+    id: string;
+    name: string | null;
+    location: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    farmSizeDecimal: number | null;
+    soilType: string | null;
+    waterSource: string | null;
+    budgetBdt: number | null;
+    targetSeason: string | null;
+    chosenCrop: string | null;
+    sowingDate: string | null;
+  };
   if (!farmer) {
-    farmer = await db.farmer.create({ data: { sessionId } });
+    farmer = (await db.farmer.create({ data: { sessionId } })) as typeof farmer;
   }
 
   const profile = {

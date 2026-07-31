@@ -11,13 +11,35 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'sessionId is required' }, { status: 400 });
   }
 
-  const farmer = await db.farmer.findUnique({
+  const farmer = (await db.farmer.findUnique({
     where: { sessionId },
     include: {
       conversations: { orderBy: { createdAt: 'asc' }, take: 100 },
       traces: { orderBy: { createdAt: 'desc' }, take: 200 },
     },
-  });
+  })) as null | {
+    sessionId: string;
+    name: string | null;
+    location: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    farmSizeDecimal: number | null;
+    soilType: string | null;
+    waterSource: string | null;
+    budgetBdt: number | null;
+    targetSeason: string | null;
+    chosenCrop: string | null;
+    sowingDate: string | null;
+    conversations: Array<{ role: string; content: string; createdAt: Date | string }>;
+    traces: Array<{
+      id: string;
+      toolName: string;
+      toolArgs: string | null;
+      toolResult: string | null;
+      durationMs: number;
+      createdAt: Date | string;
+    }>;
+  };
 
   if (!farmer) {
     return NextResponse.json({ profile: null, conversations: [], trace: [] });
