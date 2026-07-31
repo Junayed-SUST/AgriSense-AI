@@ -219,15 +219,15 @@ Return at most 3 disease candidates. If the image is unclear or multiple causes 
     };
     const answer = formatAnswer(result, language);
 
-    const farmer = await db.farmer.upsert({ where: { sessionId }, update: {}, create: { sessionId } });
+    const farmer = (await db.farmer.upsert({ where: { sessionId }, update: {}, create: { sessionId } })) as { id: string };
+    const bnUserMessage = 'পাতার রোগ বিশ্লেষণের জন্য ছবি আপলোড করেছি' + (cropHint ? ` (${cropHint})` : '') + '।';
+    const enUserMessage = `Uploaded a leaf photo for GPT disease analysis${cropHint ? ` (${cropHint})` : ''}.`;
     await db.$transaction([
       db.conversation.create({
         data: {
           farmerId: farmer.id,
           role: 'user',
-          content: language === 'bn'
-            ? `পাতার রোগ বিশ্লেষণের জন্য ছবি আপলোড করেছি${cropHint ? ` (${cropHint})` : ''}।`
-            : `Uploaded a leaf photo for GPT disease analysis${cropHint ? ` (${cropHint})` : ''}.`,
+          content: language === 'bn' ? bnUserMessage : enUserMessage,
         },
       }),
       db.conversation.create({ data: { farmerId: farmer.id, role: 'assistant', content: answer } }),
