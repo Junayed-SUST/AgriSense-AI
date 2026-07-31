@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : '';
     if (!sessionId) return NextResponse.json({ error: 'sessionId is required' }, { status: 400 });
 
-    const farmer = await db.farmer.findUnique({
+    const farmer = (await db.farmer.findUnique({
       where: { sessionId },
       include: {
         seasonPlans: {
@@ -22,7 +22,15 @@ export async function POST(req: NextRequest) {
           take: 1,
         },
       },
-    });
+    })) as null | {
+      id: string;
+      location: string | null;
+      seasonPlans: Array<{
+        id: string;
+        crop: string;
+        currentGrowthStage?: string | null;
+      }>;
+    };
     const plan = farmer?.seasonPlans[0];
     if (!farmer?.location || !plan) {
       return NextResponse.json({ checked: false, reason: 'A saved location and active season plan are required.', trace: [], alerts: [] });
