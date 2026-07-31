@@ -33,11 +33,11 @@ function shouldBlockAsOffTopic(message: string) {
 }
 
 async function saveGuardedConversation(sessionId: string, userMessage: string, answer: string) {
-  const farmer = await db.farmer.upsert({
+  const farmer = (await db.farmer.upsert({
     where: { sessionId },
     update: {},
     create: { sessionId },
-  });
+  })) as { id: string };
   await db.$transaction([
     db.conversation.create({ data: { farmerId: farmer.id, role: 'user', content: userMessage } }),
     db.conversation.create({ data: { farmerId: farmer.id, role: 'assistant', content: answer } }),
