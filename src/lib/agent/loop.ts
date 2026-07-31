@@ -316,6 +316,8 @@ export async function runAgent(
   if (!farmer) {
     farmer = (await db.farmer.create({ data: { sessionId } })) as typeof farmer;
   }
+  // Both branches above resolve to a non-null farmer row.
+  const farmerRow = farmer!;
 
   const profile = {
     name: farmer.name,
