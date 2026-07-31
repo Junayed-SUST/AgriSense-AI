@@ -347,11 +347,11 @@ export async function runAgent(
   // Load last 20 conversation messages. The current user message was just
   // persisted, so it is already part of this history and must not be appended
   // a second time.
-  const recentConvos = await db.conversation.findMany({
+  const recentConvos = (await db.conversation.findMany({
     where: { farmerId: farmerRow.id },
     orderBy: { createdAt: 'desc' },
     take: 20,
-  });
+  })) as Array<{ role: string; content: string; createdAt: Date | string }>;
   recentConvos.reverse();
 
   const history: any[] = recentConvos.map(c => ({
@@ -507,10 +507,10 @@ export async function runAgent(
       }
 
       if (toolName === 'simulate_scenario' && !result.error) {
-        const activePlan = seasonMemory || await db.seasonPlan.findFirst({
+        const activePlan = (seasonMemory || (await db.seasonPlan.findFirst({
           where: { farmerId: farmerRow.id, planStatus: 'active' },
           orderBy: { createdAt: 'desc' },
-        });
+        }))) as { id: string } | null;
         if (activePlan) {
           await recordScenarioRun({
             seasonPlanId: activePlan.id,
