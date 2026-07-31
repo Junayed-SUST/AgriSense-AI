@@ -384,4 +384,109 @@ export async function getDb(): Promise<MemoryDb> {
   return buildDb();
 }
 
+// Higher-level helpers used by the agent loop. They operate against whichever
+// backend is active — Prisma when DATABASE_URL is configured (local dev), or
+// the in-memory store on Vercel serverless. The shape of the data is identical
+// so callers can `await` the result and pass it back to Prisma-compatible
+// queries without changes.
+
+export async function createOrUpdateSeasonPlan(args: {
+  farmerId: string;
+  crop: string;
+  season?: string;
+  sowingDate?: string;
+  expectedHarvestDate?: string;
+  baselineBudgetBdt?: number;
+  expectedYieldValue?: number;
+  expectedYieldUnit?: string;
+}) {
+  const resolved = await getDb();
+  if (resolved.backend === 'prisma') {
+    // Dynamic import to avoid bundling Prisma when DATABASE_URL is absent.
+    const { PrismaClient } = await import('@prisma/client');
+    // Reuse the already-instantiated client by relying on Prisma's runtime
+    // upsert semantics; the Prisma instance is reachable via the resolved
+    // facade for richer queries.
+    const client: PrismaClient = (resolved as unknown as { __prisma?: PrismaClient }).__prisma ?? new PrismaClient();
+    return client.seasonPlan.upsert({
+      where: { id: args.crop ? `${args.farmerId}_${args.crop}` : args.farmerId },
+      update: {
+        season: args.season ?? null,
+        sowingDate: args.sowingDate ?? null,
+        expectedHarvestDate: args.expectedHarvestDate ?? null,
+        baselineBudgetBdt: args.baselineBudgetBdt ?? null,
+        expectedYieldValue: args.expectedYieldValue ?? null,
+        expectedYieldUnit: args.expectedYieldUnit ?? null,
+      },
+      create: {
+        id: `${args.farmerId}_${args.crop}_${Date.now()}`,
+        farmerId: args.farmerId,
+        crop: args.crop,
+        season: args.season ?? null,
+        sowingDate: args.sowingDate ?? null,
+        expectedHarvestDate: args.expectedHarvestDate ?? null,
+        baselineBudgetBdt: args.baselineBudgetBdt ?? null,
+        expectedYieldValue: args.expectedYieldValue ?? null,
+        expectedYieldUnit: args.expectedYieldUnit ?? null,
+      },
+    });
+  }
+  // In-memory: append or update by farmerId+crop key.
+  const id = `${args.farmerId}_${args.crop}`;
+  const store = (globalThis as unknown as { __memSeasonPlans?: Array<Record<string, unknown> & { id: string; farmerId: string; crop: string }> }).__memSeasonPlans;
+  const list = store ?? ((globalThis as unknown as { __memSeasonPlans: Array<Record<string, unknown> & { id: string; farmerId: string; crop: string }> }).__memSeasonPlans = []);
+  const existing = list.find((p) => p.id === id);
+  const row = {
+    id,
+    farmerId: args.farmerId,
+    crop: args.crop,
+    season: args.season ?? null,
+    sowingDate: args.sowingDate ?? null,
+    expectedHarvestDate: args.expectedHarvestDate ?? null,
+    baselineBudgetBdt: args.baselineBudgetBdt ?? null,
+    expectedYieldValue: args.expectedYieldValue ?? null,
+    expectedYieldUnit: args.expectedYieldUnit ?? null,
+    currentGrowthStage: existing?.currentGrowthStage ?? 'Sowing',
+    planStatus: existing?.planStatus ?? 'active',
+    createdAt: existing?.createdAt ?? new Date(),
+    updatedAt: new Date(),
+  };
+  if (existing) Object.assign(existing, row);
+  else list.push(row);
+  return row;
+}
+
+export async function recordScenarioRun(args: {
+  seasonPlanId: string;
+  scenarioType: string;
+  inputJson: unknown;
+  outputJson: unknown;
+}) {
+  const resolved = await getDb();
+  if (resolved.backend === 'prisma') {
+    const { PrismaClient } = await import('@prisma/client');
+    const client: PrismaClient = (resolved as unknown as { __prisma?: PrismaClient }).__prisma ?? new PrismaClient();
+    return client.scenarioRun.create({
+      data: {
+        seasonPlanId: args.seasonPlanId,
+        scenarioType: args.scenarioType,
+        inputJson: JSON.stringify(args.inputJson ?? {}),
+        outputJson: JSON.stringify(args.outputJson ?? {}),
+      },
+    });
+  }
+  const store = (globalThis as unknown as { __memScenarioRuns?: Array<Record<string, unknown> & { id: string; seasonPlanId: string }> }).__memScenarioRuns;
+  const list = store ?? ((globalThis as unknown as { __memScenarioRuns: Array<Record<string, unknown> & { id: string; seasonPlanId: string }> }).__memScenarioRuns = []);
+  const row = {
+    id: `scn_${Date.now().toString(36)}_${list.length}`,
+    seasonPlanId: args.seasonPlanId,
+    scenarioType: args.scenarioType,
+    inputJson: JSON.stringify(args.inputJson ?? {}),
+    outputJson: JSON.stringify(args.outputJson ?? {}),
+    createdAt: new Date(),
+  };
+  list.push(row);
+  return row;
+}
+
 export type { MemoryDb, FarmerRow, ConversationRow, TraceRow };
