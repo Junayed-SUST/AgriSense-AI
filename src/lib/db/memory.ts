@@ -407,7 +407,9 @@ export async function createOrUpdateSeasonPlan(args: {
     // Reuse the already-instantiated client by relying on Prisma's runtime
     // upsert semantics; the Prisma instance is reachable via the resolved
     // facade for richer queries.
-    const client: PrismaClient = (resolved as unknown as { __prisma?: PrismaClient }).__prisma ?? new PrismaClient();
+    const client: InstanceType<typeof PrismaClient> =
+      (resolved as unknown as { __prisma?: InstanceType<typeof PrismaClient> }).__prisma ??
+      new PrismaClient();
     return client.seasonPlan.upsert({
       where: { id: args.crop ? `${args.farmerId}_${args.crop}` : args.farmerId },
       update: {
@@ -465,7 +467,9 @@ export async function recordScenarioRun(args: {
   const resolved = await getDb();
   if (resolved.backend === 'prisma') {
     const { PrismaClient } = await import('@prisma/client');
-    const client: PrismaClient = (resolved as unknown as { __prisma?: PrismaClient }).__prisma ?? new PrismaClient();
+    const client: InstanceType<typeof PrismaClient> =
+      (resolved as unknown as { __prisma?: InstanceType<typeof PrismaClient> }).__prisma ??
+      new PrismaClient();
     return client.scenarioRun.create({
       data: {
         seasonPlanId: args.seasonPlanId,
