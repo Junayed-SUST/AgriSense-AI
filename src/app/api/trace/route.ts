@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 // GET /api/trace?sessionId=... — fetch the agent's tool-call trace (Tier 0 #8)
 export async function GET(req: NextRequest) {

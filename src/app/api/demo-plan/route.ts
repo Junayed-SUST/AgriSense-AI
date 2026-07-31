@@ -24,6 +24,7 @@ import { CROPS } from '@/lib/kb/crops';
 import type { ToolName } from '@/lib/agent/tools/registry';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 function makeTraceEntry(iteration: number, toolName: ToolName, toolArgs: any, toolResult: any, durationMs: number) {

@@ -4,6 +4,7 @@ import sharp from 'sharp';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;

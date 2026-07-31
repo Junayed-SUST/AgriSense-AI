@@ -3,6 +3,7 @@ import { runAgent } from '@/lib/agent/loop';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const SENSITIVE_OFF_TOPIC_PATTERNS = [

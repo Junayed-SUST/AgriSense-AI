@@ -83,8 +83,29 @@ function readZipEntry(zipFile: keyof typeof ZIP_FILES, entryName: string): strin
 
   // ZIP_FILES is a closed allow-list. The tracing ignore prevents Turbopack from
   // treating process.cwd() as an instruction to bundle the entire repository;
-  // next.config.ts explicitly includes both required assets instead.
-  const bytes = fs.readFileSync(path.join(/* turbopackIgnore: true */ process.cwd(), ZIP_FILES[zipFile]));
+  // next.config.ts explicitly includes both required assets instead. We try
+  // multiple candidate locations because the resolved working directory differs
+  // between local dev (`./<file>.zip`) and serverless deployment.
+  const candidatePaths = [
+    /* turbopackIgnore: true */ path.join(process.cwd(), ZIP_FILES[zipFile]),
+    /* turbopackIgnore: true */ path.join(process.cwd(), '..', ZIP_FILES[zipFile]),
+    /* turbopackIgnore: true */ path.join(process.cwd(), '..', '..', ZIP_FILES[zipFile]),
+    /* turbopackIgnore: true */ path.join('/var/task', ZIP_FILES[zipFile]),
+    /* turbopackIgnore: true */ path.join('/tmp', ZIP_FILES[zipFile]),
+  ];
+  let bytes: Buffer | null = null;
+  let lastError: unknown = null;
+  for (const candidate of candidatePaths) {
+    try {
+      bytes = fs.readFileSync(candidate);
+      break;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  if (!bytes) {
+    throw new Error(`ZIP asset not found at any candidate path for ${ZIP_FILES[zipFile]}: ${(lastError as Error)?.message ?? 'unknown error'}`);
+  }
   let eocd = -1;
   for (let offset = bytes.length - 22; offset >= Math.max(0, bytes.length - 65_557); offset--) {
     if (bytes.readUInt32LE(offset) === 0x06054b50) { eocd = offset; break; }

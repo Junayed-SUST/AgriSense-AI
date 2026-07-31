@@ -4,6 +4,7 @@ import { getWeather } from '@/lib/agent/tools/weather';
 import { checkWeatherTriggers } from '@/lib/agent/tools/tier1_tools';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 export async function POST(req: NextRequest) {
