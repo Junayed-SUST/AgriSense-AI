@@ -37,6 +37,12 @@ export const db = {
     findMany: (...args: Parameters<MemoryDb['trace']['findMany']>) =>
       ensureResolved().then(d => d.trace.findMany(...args)),
   },
+  traceEntry: {
+    create: (...args: Parameters<MemoryDb['trace']['create']>) =>
+      ensureResolved().then(d => d.trace.create(...args)),
+    findMany: (...args: Parameters<MemoryDb['trace']['findMany']>) =>
+      ensureResolved().then(d => d.trace.findMany(...args)),
+  },
   $transaction: (ops: Parameters<MemoryDb['$transaction']>[0]) =>
     ensureResolved().then(d => d.$transaction(ops)),
   backend: 'memory' as const,
