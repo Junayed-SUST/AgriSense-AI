@@ -1,5 +1,187 @@
 import { db as prisma } from '@/lib/db';
 
+// Memory store — wraps Prisma with an in-memory fallback so the app keeps
+// working on Vercel serverless where DATABASE_URL is not configured (SQLite
+// is not viable in serverless because the filesystem is ephemeral). The
+// fallback mirrors the subset of operations used by the chat/trace/profile
+// routes and degrades gracefully — data is lost on cold starts but the
+// agent, tools, and demo flow still work.
+
+type FarmerRow = {
+  id: string;
+  sessionId: string;
+  name?: string | null;
+  location?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  farmSizeDecimal?: number | null;
+  soilType?: string | null;
+  waterSource?: string | null;
+  budgetBdt?: number | null;
+  targetSeason?: string | null;
+  chosenCrop?: string | null;
+  sowingDate?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type ConversationRow = {
+  id: string;
+  farmerId: string;
+  role: string;
+  content: string;
+  createdAt: Date;
+};
+
+type TraceRow = {
+  id: string;
+  farmerId: string;
+  toolName: string;
+  toolArgs: string;
+  toolResult: string;
+  durationMs: number;
+  createdAt: Date;
+};
+
+interface FarmerOps {
+  upsert(args: { where: { sessionId: string }; update: Partial<FarmerRow>; create: { sessionId: string } }): Promise<FarmerRow>;
+  update(args: { where: { id: string }; data: Partial<FarmerRow> }): Promise<FarmerRow>;
+}
+
+interface ConversationOps {
+  create(args: { data: Omit<ConversationRow, 'id' | 'createdAt'> }): Promise<ConversationRow>;
+  findMany(args: { where: { farmerId: string }; orderBy?: { createdAt: 'asc' | 'desc' }; take?: number }): Promise<ConversationRow[]>;
+}
+
+interface TraceOps {
+  create(args: { data: Omit<TraceRow, 'id' | 'createdAt'> }): Promise<TraceRow>;
+  findMany(args: { where: { farmerId: string }; orderBy?: { createdAt: 'asc' | 'desc' }; take?: number }): Promise<TraceRow[]>;
+}
+
+interface TransactionOps {
+  <T extends unknown[]>(ops: T): Promise<T>;
+}
+
+interface MemoryDb {
+  farmer: FarmerOps;
+  conversation: ConversationOps;
+  trace: TraceOps;
+  $transaction: TransactionOps;
+  readonly backend: 'prisma' | 'memory';
+}
+
+function createMemoryBackend(): MemoryDb {
+  const farmers = new Map<string, FarmerRow>();
+  const conversations: ConversationRow[] = [];
+  const traces: TraceRow[] = [];
+  let counter = 0;
+  const newId = () => `mem_${Date.now().toString(36)}_${(counter++).toString(36)}`;
+
+  const farmerOps: FarmerOps = {
+    async upsert({ where, update, create }) {
+      const existing = farmers.get(where.sessionId);
+      if (existing) {
+        Object.assign(existing, update, { updatedAt: new Date() });
+        return existing;
+      }
+      const row: FarmerRow = {
+        id: newId(),
+        sessionId: create.sessionId,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        ...(update as Partial<FarmerRow>),
+      };
+      farmers.set(create.sessionId, row);
+      return row;
+    },
+    async update({ where, data }) {
+      for (const row of farmers.values()) {
+        if (row.id === where.id) {
+          Object.assign(row, data, { updatedAt: new Date() });
+          return row;
+        }
+      }
+      throw new Error('Farmer not found');
+    },
+  };
+
+  const conversationOps: ConversationOps = {
+    async create({ data }) {
+      const row: ConversationRow = { id: newId(), createdAt: new Date(), ...data };
+      conversations.push(row);
+      return row;
+    },
+    async findMany({ where, orderBy, take }) {
+      let rows = conversations.filter(c => c.farmerId === where.farmerId);
+      if (orderBy?.createdAt === 'desc') rows = rows.slice().reverse();
+      if (typeof take === 'number') rows = rows.slice(-take);
+      return rows;
+    },
+  };
+
+  const traceOps: TraceOps = {
+    async create({ data }) {
+      const row: TraceRow = { id: newId(), createdAt: new Date(), ...data };
+      traces.push(row);
+      return row;
+    },
+    async findMany({ where, orderBy, take }) {
+      let rows = traces.filter(t => t.farmerId === where.farmerId);
+      if (orderBy?.createdAt === 'desc') rows = rows.slice().reverse();
+      if (typeof take === 'number') rows = rows.slice(-take);
+      return rows;
+    },
+  };
+
+  return {
+    farmer: farmerOps,
+    conversation: conversationOps,
+    trace: traceOps,
+    async $transaction(ops) {
+      return Promise.all(ops);
+    },
+    backend: 'memory',
+  };
+}
+
+let cachedDb: MemoryDb | null = null;
+let initAttempted = false;
+
+async function buildDb(): Promise<MemoryDb> {
+  if (cachedDb) return cachedDb;
+  if (initAttempted) return cachedDb ?? createMemoryBackend();
+  initAttempted = true;
+
+  const hasDatabaseUrl = typeof process.env.DATABASE_URL === 'string' && process.env.DATABASE_URL.length > 0;
+  if (!hasDatabaseUrl) {
+    cachedDb = createMemoryBackend();
+    return cachedDb;
+  }
+
+  try {
+    const { PrismaClient } = await import('@prisma/client');
+    const prisma = new PrismaClient({ log: ['error', 'warn'] });
+    // Smoke test — verify the schema can actually be reached before we commit.
+    await prisma.$connect();
+    cachedDb = {
+      farmer: prisma.farmer as unknown as FarmerOps,
+      conversation: prisma.conversation as unknown as ConversationOps,
+      trace: prisma.trace as unknown as TraceOps,
+      $transaction: prisma.$transaction.bind(prisma) as unknown as TransactionOps,
+      backend: 'prisma',
+    };
+    return cachedDb;
+  } catch (err) {
+    console.warn('[db] Prisma unavailable, using in-memory fallback:', (err as Error)?.message ?? err);
+    cachedDb = createMemoryBackend();
+    return cachedDb;
+  }
+}
+
+export async function getDb(): Promise<MemoryDb> {
+  return buildDb();
+}
+
 export async function createOrUpdateSeasonPlan(params: {
   farmerId: string;
   crop: string;
@@ -115,3 +297,5 @@ export async function getFarmerMemory(farmerId: string) {
 
   return farmer;
 }
+
+export type { MemoryDb, FarmerRow, ConversationRow, TraceRow };

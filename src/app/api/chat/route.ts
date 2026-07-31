@@ -41,7 +41,7 @@ async function saveGuardedConversation(sessionId: string, userMessage: string, a
   await db.$transaction([
     db.conversation.create({ data: { farmerId: farmer.id, role: 'user', content: userMessage } }),
     db.conversation.create({ data: { farmerId: farmer.id, role: 'assistant', content: answer } }),
-  ]);
+  ] as Parameters<typeof db.$transaction>[0]);
 }
 
 export async function POST(req: NextRequest) {
