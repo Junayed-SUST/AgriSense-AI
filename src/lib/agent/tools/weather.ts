@@ -54,6 +54,16 @@ const BD_LOCATION_ALIASES: Record<string, string> = {
 
 function normalizeLocation(input: string): string {
   let result = input;
+  // 1) Strip administrative qualifiers that GeoNames/Open-Meteo do not index
+  //    inside the `name` field. Farmers frequently say "Cumilla Sadar",
+  //    "Bogura District", "Jessore Zila" etc. — Open-Meteo's geocoder indexes
+  //    the district name alone, so dropping these tokens yields a hit.
+  result = result.replace(/\b(sadar(?:\s+(?:dakshin|uttar))?|district|zila|upazila|thana|division|division(?:al)?)\b/gi, '');
+  result = result.replace(/জেলা|উপজেলা|সদর|বিভাগ/g, '');
+  result = result.replace(/[,،]+/g, ' ');
+  result = result.replace(/\s+/g, ' ').trim();
+
+  // 2) Apply transliteration aliases (Bogura → Bogra, Cumilla → Comilla, ...)
   for (const [alias, canonical] of Object.entries(BD_LOCATION_ALIASES)) {
     const re = new RegExp(`\\b${alias}\\b`, 'gi');
     result = result.replace(re, canonical);
@@ -182,24 +192,35 @@ function generateAgronomicAlerts(forecast: WeatherResult['forecast']): Agronomic
 export async function getWeather(location: string): Promise<WeatherResult> {
   // Normalize Bangladesh district transliterations (e.g. "Bogura" → "Bogra")
   const normalized = normalizeLocation(location);
+  // If normalization collapsed the input, fall back to the raw location.
+  const searchName = normalized || location;
 
   // Step 1: geocode the location name → lat/long
   // Always filter to Bangladesh (country=BD) first — this avoids "Bogura" matching
   // a Russian town "Bogurayev" instead of Bogra district in Bangladesh.
-  const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(normalized)}&count=1&language=en&format=json&country=BD`;
+  const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchName)}&count=3&language=en&format=json&country=BD`;
   const geoRes = await fetch(geoUrl);
   if (!geoRes.ok) {
     throw new Error(`Geocoding failed: ${geoRes.status} ${geoRes.statusText}`);
   }
   const geoData = await geoRes.json();
   if (!geoData.results || geoData.results.length === 0) {
-    // Fallback: try without country filter (for non-Bangladesh queries)
-    const geoUrl2 = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(normalized + ' Bangladesh')}&count=1&language=en&format=json`;
+    // Fallback 1: drop the country filter entirely (handles people outside BD
+    // and cases where the precise BD label is unfamiliar to GeoNames).
+    const geoUrl2 = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(searchName + ' Bangladesh')}&count=3&language=en&format=json`;
     const geoRes2 = await fetch(geoUrl2);
     if (!geoRes2.ok) throw new Error(`Fallback geocoding failed: ${geoRes2.status} ${geoRes2.statusText}`);
     const geoData2 = await geoRes2.json();
     if (!geoData2.results || geoData2.results.length === 0) {
-      throw new Error(`Could not geocode location: ${location} (no Bangladesh match found)`);
+      // Fallback 2: try the original un-normalized input, in case the alias
+      // strip accidentally removed a needed token (e.g. "Brahmanbaria Sadar").
+      const geoUrl3 = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=3&language=en&format=json&country=BD`;
+      const geoRes3 = await fetch(geoUrl3);
+      const geoData3 = geoRes3.ok ? await geoRes3.json() : { results: [] };
+      if (!geoData3.results || geoData3.results.length === 0) {
+        throw new Error(`Could not geocode location: ${location} (no Bangladesh match found)`);
+      }
+      return fetchForecast(location, geoData3.results[0]);
     }
     return fetchForecast(location, geoData2.results[0]);
   }
